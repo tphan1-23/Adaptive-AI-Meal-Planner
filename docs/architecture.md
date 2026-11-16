@@ -51,12 +51,19 @@ Pure functions over plain `RecipeLite` objects (see `src/types`), unit tested wi
 2. `rank.ts` `rankRecipes`: score = relative calorie error minus `0.05 x` summed tag affinity. Lower is better, ties break on id. The affinity map comes from `server/adherence`.
 3. `generate-plan.ts` `generatePlan`: one recipe per day, sized to the meal's share of the daily target (`MEAL_SHARE`, dinner = 40%), no repeats until the pool is exhausted.
 
-### AI layer (`src/server/ai`, planned)
+### AI layer (`src/server/ai`)
 Receives only the ranked shortlist. Falls back to the code-based result on any failure (see Failure handling). Four jobs:
 - **Choose and explain** a recipe from the shortlist.
 - **Convert** steps for the user's equipment. Stored on the plan entry (`convertedSteps`, `convertedForEquipment`).
 - **Modify** a recipe on request (for example "make it vegetarian" or "less spicy"). Stored per user on `PlanEntry.modifiedRecipe`, never on the shared recipe. Allergies are re-checked and calories recomputed in code.
 - **Generate** a new recipe from the user's tastes (top tag affinities, favorites) and a few dataset recipes. Saved as a private `Recipe` (`source = "ai"`, `ownerId` = the user, `basedOnIds` = the inspiration recipes). Nutrition is never taken from the AI: it is computed in code from `Ingredient`. Rejected if it contains an allergen or an ingredient we cannot match.
+
+Files:
+- `gemini.ts`: the only code that calls Gemini (server-side). Uses the `gemini-flash-latest` alias and tries `gemini-flash-lite-latest` if the first fails. Set `GEMINI_MODEL` to force one model. 20 second timeout per call.
+- `adapter.ts`: `chooseRecipe`, `convertSteps`, `modifyRecipe`, `generateRecipe`. Each takes an injectable `llm` function (tests use a fake), parses the reply with Zod and falls back safely: top-ranked recipe, original steps, or `null` for modify/generate. Prompts carry recipe and preference data only, never a name, email or user id. Free-text user requests are clipped and sent as quoted data.
+- `nutrition.ts`: `computeNutrition` sums per-100g `Ingredient` data over ingredient weights. Returns `null` if any ingredient is unknown.
+
+Checks applied in code to AI output: the chosen id must be in the shortlist, allergens are re-checked on modified and generated recipes (`ingredientsHaveAllergen`), generated recipes are rejected if calories land more than 35% from the target, and modified recipes recompute calories when every ingredient is in grams (otherwise the original calories are kept and `caloriesVerified` is false).
 
 ## Data model (`prisma/schema.prisma`)
 
