@@ -1,0 +1,82 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// One row per user. id = Supabase auth user id.
+model Profile {
+  id            String   @id @db.Uuid
+  heightCm      Float?
+  weightKg      Float?
+  age           Int?
+  sex           String? // male | female
+  activityLevel String? // sedentary | light | moderate | active | very_active
+  goal          String? // lose | maintain | gain
+  diet          String? // e.g. vegetarian, vegan
+  allergies     String[]
+  equipment     String[]
+  calorieTarget Int?
+  createdAt     DateTime @default(now())
+
+  weightLogs  WeightLog[]
+  planEntries PlanEntry[]
+}
+
+model WeightLog {
+  id       String   @id @default(cuid())
+  userId   String   @db.Uuid
+  weightKg Float
+  loggedAt DateTime @default(now())
+  user     Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, loggedAt])
+}
+
+// Imported once from Food.com. Ground truth, never AI-generated.
+model Recipe {
+  id          String   @id @default(cuid())
+  sourceId    String?  @unique // Food.com recipe id
+  name        String
+  calories    Float
+  proteinG    Float?
+  carbsG      Float?
+  fatG        Float?
+  ingredients Json // [{ name, quantity, unit }]
+  steps       String[]
+  tags        String[]
+  equipment   String[]
+  allergens   String[]
+  diets       String[]
+
+  planEntries PlanEntry[]
+}
+
+// A recipe placed on a day/meal of a user's weekly plan.
+model PlanEntry {
+  id             String   @id @default(cuid())
+  userId         String   @db.Uuid
+  recipeId       String
+  date           DateTime @db.Date
+  mealType       String   @default("dinner") // breakfast | lunch | dinner | snack
+  convertedSteps String[] // cached AI equipment conversion
+  user           Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recipe         Recipe   @relation(fields: [recipeId], references: [id])
+
+  @@unique([userId, date, mealType])
+}
+
+// Optional later: USDA FoodData Central for substitutions.
+model Ingredient {
+  id       String @id @default(cuid())
+  fdcId    Int?   @unique
+  name     String
+  calories Float
+  proteinG Float
+  carbsG   Float
+  fatG     Float
+}
