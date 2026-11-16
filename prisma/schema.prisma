@@ -8,7 +8,7 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// One row per user. id = Supabase auth user id.
+// One row per user (profile + preferences). id = Supabase auth user id.
 model Profile {
   id            String   @id @db.Uuid
   heightCm      Float?
@@ -17,6 +17,8 @@ model Profile {
   sex           String? // male | female
   activityLevel String? // sedentary | light | moderate | active | very_active
   goal          String? // lose | maintain | gain
+  goalRateKg    Float? // target change per week, kg (positive number)
+  cuisines      String[]
   diet          String? // e.g. vegetarian, vegan
   allergies     String[]
   equipment     String[]
@@ -24,7 +26,13 @@ model Profile {
   createdAt     DateTime @default(now())
 
   weightLogs  WeightLog[]
+  plans       WeeklyPlan[]
   planEntries PlanEntry[]
+  favorites   FavoriteRecipe[]
+  mealLogs    MealLog[]
+  signals     UserRecipeSignal[]
+  affinities  UserTagAffinity[]
+  ownRecipes  Recipe[]
 }
 
 model WeightLog {
@@ -37,10 +45,15 @@ model WeightLog {
   @@index([userId, loggedAt])
 }
 
-// Imported once from Food.com. Ground truth, never AI-generated.
+// Dataset recipes (source = "dataset", imported once from Food.com, ownerId null, shared by everyone)
+// and AI-generated recipes (source = "ai", private to ownerId).
+// Nutrition is never taken from the AI: for AI recipes it is computed in code from Ingredient.
 model Recipe {
   id          String   @id @default(cuid())
   sourceId    String?  @unique // Food.com recipe id
+  source      String   @default("dataset") // dataset | ai
+  ownerId     String?  @db.Uuid // set only for AI-generated recipes
+  basedOnIds  String[] // recipes the AI used as inspiration
   name        String
   calories    Float
   proteinG    Float?
@@ -52,31 +65,142 @@ model Recipe {
   equipment   String[]
   allergens   String[]
   diets       String[]
+  createdAt   DateTime @default(now())
 
+  owner       Profile?           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   planEntries PlanEntry[]
+  favorites   FavoriteRecipe[]
+  signals     UserRecipeSignal[]
+
+  @@index([ownerId])
 }
 
-// A recipe placed on a day/meal of a user's weekly plan.
+// One week of plans for a user. calorieTarget = the target used when it was generated.
+model WeeklyPlan {
+  id            String   @id @default(cuid())
+  userId        String   @db.Uuid
+  weekStart     DateTime @db.Date
+  calorieTarget Int
+  createdAt     DateTime @default(now())
+
+  user          Profile            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entries       PlanEntry[]
+  shoppingItems ShoppingListItem[]
+
+  @@unique([userId, weekStart])
+}
+
+// A recipe placed on a day of a user's plan. position 0 = the day's main pick,
+// 1+ = extra recipes the user asked for on the same day.
 model PlanEntry {
+  id       String   @id @default(cuid())
+  userId   String   @db.Uuid
+  planId   String
+  recipeId String
+  date     DateTime @db.Date
+  mealType String   @default("dinner") // breakfast | lunch | dinner | snack
+  position Int      @default(0)
+
+  // Cached per-user AI results, generated lazily on request.
+  convertedSteps        String[]
+  convertedForEquipment String[]
+  modifiedRecipe        Json? // AI-modified variant: { request, name, ingredients, steps, calories, ... }
+
+  user     Profile    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan     WeeklyPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  recipe   Recipe     @relation(fields: [recipeId], references: [id])
+  mealLogs MealLog[]
+
+  @@unique([userId, date, mealType, position])
+  @@index([planId])
+}
+
+model FavoriteRecipe {
+  id                    String   @id @default(cuid())
+  userId                String   @db.Uuid
+  recipeId              String
+  convertedSteps        String[]
+  convertedForEquipment String[]
+  createdAt             DateTime @default(now())
+
+  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recipe Recipe  @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, recipeId])
+}
+
+// Aggregated ingredients for a week's plan.
+model ShoppingListItem {
+  id       String  @id @default(cuid())
+  planId   String
+  name     String
+  quantity Float
+  unit     String
+  checked  Boolean @default(false)
+
+  plan WeeklyPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId])
+}
+
+// What the user actually ate, for planned-vs-actual adherence charts.
+model MealLog {
   id             String   @id @default(cuid())
   userId         String   @db.Uuid
-  recipeId       String
+  planEntryId    String?
   date           DateTime @db.Date
-  mealType       String   @default("dinner") // breakfast | lunch | dinner | snack
-  convertedSteps String[] // cached AI equipment conversion
-  user           Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  recipe         Recipe   @relation(fields: [recipeId], references: [id])
+  mealType       String   @default("dinner")
+  status         String // eaten_as_planned | modified | skipped | ad_hoc
+  loggedCalories Float?
+  loggedProteinG Float?
+  loggedCarbsG   Float?
+  loggedFatG     Float?
+  note           String?
+  createdAt      DateTime @default(now())
 
-  @@unique([userId, date, mealType])
+  user      Profile    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planEntry PlanEntry? @relation(fields: [planEntryId], references: [id], onDelete: SetNull)
+
+  @@index([userId, date])
 }
 
-// Optional later: USDA FoodData Central for substitutions.
+// Raw log of every preference-relevant action.
+model UserRecipeSignal {
+  id        String   @id @default(cuid())
+  userId    String   @db.Uuid
+  recipeId  String
+  type      String // swap_out | swap_in | rating | favorite | skip
+  value     Float    @default(1) // e.g. the rating
+  createdAt DateTime @default(now())
+
+  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recipe Recipe  @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// Running score per tag (cuisine, ingredient category...) built from signals. Used by rank.ts.
+model UserTagAffinity {
+  id     String @id @default(cuid())
+  userId String @db.Uuid
+  tag    String
+  score  Float  @default(0)
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tag])
+}
+
+// USDA FoodData Central subset: ground truth for substitutions and AI-recipe nutrition.
 model Ingredient {
-  id       String @id @default(cuid())
-  fdcId    Int?   @unique
+  id       String  @id @default(cuid())
+  fdcId    Int?    @unique
   name     String
-  calories Float
+  category String? // e.g. protein, grain, dairy, vegetable. Substitutes stay in-category.
+  calories Float // per 100 g
   proteinG Float
   carbsG   Float
   fatG     Float
+
+  @@index([category])
 }
