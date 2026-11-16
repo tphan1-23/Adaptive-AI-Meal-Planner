@@ -47,6 +47,17 @@ export function applyFloor(target: number, sex: Sex): number {
 }
 
 /** Starting daily calorie target for a user: TDEE + goal adjustment, floored. */
-export function dailyTarget(stats: BodyStats, goal: Goal): number {
-  return applyFloor(tdee(stats) + GOAL_DELTA[goal], stats.sex);
+export function dailyTarget(stats: BodyStats, goal: Goal, goalRateKg?: number | null): number {
+  return applyFloor(tdee(stats) + goalDelta(goal, goalRateKg), stats.sex);
+}
+
+/** ~7700 kcal per kg of body weight, spread over 7 days. */
+export const KCAL_PER_KG_PER_DAY = 7700 / 7;
+const MAX_DAILY_DEFICIT = 1000;
+
+/** Daily calorie adjustment for a goal. Uses the user's weekly rate when given, else the default. */
+export function goalDelta(goal: Goal, goalRateKg?: number | null): number {
+  if (goal === "maintain" || goalRateKg == null) return GOAL_DELTA[goal];
+  const delta = Math.round(goalRateKg * KCAL_PER_KG_PER_DAY);
+  return goal === "lose" ? -Math.min(delta, MAX_DAILY_DEFICIT) : delta;
 }
