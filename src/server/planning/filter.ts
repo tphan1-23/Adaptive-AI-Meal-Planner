@@ -24,3 +24,12 @@ export function filterRecipes(
     return true;
   });
 }
+
+/** True if any ingredient name mentions one of the user's allergens. Used to re-check AI output. */
+export function ingredientsHaveAllergen(ingredientNames: string[], allergies: string[]): boolean {
+  const al = allergies.map(norm).filter(Boolean);
+  return ingredientNames.some((n) => {
+    const name = norm(n);
+    return al.some((a) => name.includes(a));
+  });
+}
