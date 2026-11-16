@@ -90,3 +90,11 @@ ALTER TABLE "PlanEntry" ADD CONSTRAINT "PlanEntry_userId_fkey" FOREIGN KEY ("use
 
 -- AddForeignKey
 ALTER TABLE "PlanEntry" ADD CONSTRAINT "PlanEntry_recipeId_fkey" FOREIGN KEY ("recipeId") REFERENCES "Recipe"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- Row Level Security: block direct access via Supabase's REST API.
+-- Our app uses Prisma (postgres role), which bypasses RLS, so it is unaffected.
+ALTER TABLE "Profile"    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "WeightLog"  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "Recipe"     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "PlanEntry"  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "Ingredient" ENABLE ROW LEVEL SECURITY;
