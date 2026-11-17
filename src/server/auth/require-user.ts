@@ -19,9 +19,14 @@ export class UnauthorizedError extends Error {
 
 /** Returns the logged-in user's id (Profile.id) or throws UnauthorizedError. */
 export async function requireUser(): Promise<string> {
-  const { data, error } = await createSupabaseServer().auth.getUser();
-  if (error || !data.user) throw new UnauthorizedError();
-  return data.user.id;
+  try {
+    const { data, error } = await createSupabaseServer().auth.getUser();
+    if (error || !data.user) throw new UnauthorizedError();
+    return data.user.id;
+  } catch {
+    // Any failure to read or verify the session means "not logged in", never a 500.
+    throw new UnauthorizedError();
+  }
 }
 
 /**

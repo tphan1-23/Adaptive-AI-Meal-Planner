@@ -40,9 +40,12 @@ If Gemini is unavailable, rate limited or returns an invalid result, the app sti
 
 ### Auth (`src/server/auth`)
 - `supabase-server.ts`: `createSupabaseServer()` builds a Supabase client bound to the request cookies.
-- `require-user.ts`: `requireUser()` returns the verified user id (the `Profile.id`) or throws `UnauthorizedError`. `withUser(handler)` wraps a route handler, passes the user id as its first argument and answers 401 when not logged in. All routes must use it.
+- `cookies.ts`: `dropMalformedAuthCookies` removes login cookies that cannot be decoded before Supabase sees them. A forged or corrupted cookie makes Supabase's own decoder throw in a background promise, so the request is treated as logged out instead.
+- `require-user.ts`: `requireUser()` returns the verified user id (the `Profile.id`) or throws `UnauthorizedError`; any failure to read or verify the session counts as not logged in (401, never 500). `withUser(handler)` wraps a route handler, passes the user id as its first argument and answers 401 when not logged in. It also turns `HttpError` into a JSON error. All routes must use it.
 
-Required env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `DATABASE_URL`, `DIRECT_URL`, `GEMINI_API_KEY`.
+Verified against the real Supabase project with two temporary users and the running dev server (33 checks): every route answers 401 with no login, a forged cookie or a fake token; a logged-in user can onboard, plan a week and read their own entries and shopping list; a second user gets 404 on the first user's entries, swap, convert, modify, plan and shopping list, and cannot tick their shopping items.
+
+Required env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `DATABASE_URL`, `DIRECT_URL`, `GEMINI_API_KEY`. `NEXT_PUBLIC_SUPABASE_URL` must be the plain project URL (`https://<ref>.supabase.co`), not the `/rest/v1/` address, or login calls go to the wrong place. The new `sb_publishable_` and `sb_secret_` keys go in the `apikey` header only, not as a bearer token.
 
 ### Planning engine (`src/server/planning`)
 Pure functions over plain `RecipeLite` objects (see `src/types`), unit tested without a database. Checked against the real recipe table (about 20,000 recipes): a week plans in well under 100 ms and every day lands within a few kcal of the target.
