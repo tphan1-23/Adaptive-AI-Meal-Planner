@@ -56,6 +56,8 @@ Pure functions over plain `RecipeLite` objects (see `src/types`), unit tested wi
 4. `rank.ts` `rankRecipes`: score = relative calorie error minus `0.05 x` summed tag affinity. Lower is better, ties break on id. The affinity map comes from `server/adherence`.
 5. `generate-plan.ts` `generatePlan`: one recipe per day, sized to the meal's share of the daily target (`MEAL_SHARE`, dinner = 40%). Pass `seed` (for example `userId:weekStart`) to draw the week from the top candidates in a repeatable shuffle, so the same week is stable but the next week differs. Pass `excludeIds` with recently used recipes. Recipes are not repeated within a plan unless the pool runs out.
 
+6. `substitution.ts` `findSubstitutes`: nearest-neighbor search over `Ingredient` rows. Candidates stay in the original's category, must be used by at least 15 recipe lines (so nobody is told to cook with antelope), never contain the user's allergens (matched on the ingredient name, so this is a best-effort check) and respect the diet. In the USDA table every `protein` row is an animal food, so vegetarians only get eggs from it and vegans get none. Distance is the sum of relative differences in calories, protein, carbs and fat; anything above 1 is dropped, 0.5 or less is `close`, the rest `rough`. `grams` scales the amount to keep calories the same. The AI only words the best `close` suggestion (6 second limit, template sentence otherwise); it never picks or judges the match. Limitations: matching a recipe's wording to an ingredient can land on a generic word ("tagliatelle pasta noodles" matches `noodle`), which is why the response says `matchedAs`; very common items with no close relative (butter) return nothing.
+
 Loading every recipe takes about 2 seconds, so the services narrow the query in SQL first and rank only that set. Ingredient quantities in the dataset are placeholders (`1 item`), so shopping lists and the AI modify/convert prompts do not have real amounts yet.
 
 ### AI layer (`src/server/ai`)
@@ -75,7 +77,7 @@ Checks applied in code to AI output: the chosen id must be in the shortlist, all
 ### Services (database plus the engines above)
 - `planning/service.ts`: `createWeekPlan`, `getWeekPlan`, `recommendForDay`, `swapEntry`, `getRecipeForUser`, `getEntryDetail`. Candidates are narrowed in SQL (visible recipes, calorie window around the meal target, meal tags, allergens, diet) and filtered again in code. Recipes used in the previous 3 weeks are skipped. Taste scores are the learned affinity plus a +1 boost for each cuisine chosen at onboarding. Plans start on a Monday.
 - `ai/service.ts`: `convertEntry`, `modifyEntry`, `resetModification`, `generateForUser`. Every entry is looked up with its `userId`, so another user's entry or private AI recipe is a 404. AI calls are limited to 6 a minute per user (`ai/rate-limit.ts`, the free Gemini tier is shared by everyone) and 10 generated recipes a day.
-- `ai/lookup.ts`: builds the ingredient lookup from the `Ingredient` table and reuses it for 10 minutes.
+- `ai/lookup.ts`: builds the ingredient lookup and an ingredient index (rows, name matcher, and how many recipe lines use each ingredient) from the `Ingredient` table and reuses them for 10 minutes.
 - Services throw `HttpError(status, message)`; `withUser` turns it into a JSON error response.
 
 ## API routes
@@ -90,8 +92,11 @@ All routes need a logged-in user (401 otherwise) and only ever touch that user's
 | `POST /api/convert` | `{ entryId }` | `{ available, steps, note, cached }`: steps for the user's equipment. 400 if no equipment in the profile |
 | `POST /api/modify` | `{ entryId, request }` | `{ entry, modified }` for a change like "make it spicier". 422 if it fails the allergy checks. `DELETE` with `{ entryId }` undoes it |
 | `POST /api/generate` | `{ wish?, date?, mealType? }` | `{ recipe, entry }`: a new private AI recipe. With `date` it is also added to that day. 422: try again |
+| `POST /api/substitute` | `{ entryId, ingredient }` | `{ ingredient, matchedAs, amountAssumed, originalGrams, substitutes: [{ name, category, quality, grams, distance, per100g, note }] }`: up to 3 swaps for one ingredient. 404 if the ingredient is not in the recipe, 422 if we have no nutrition data for it. `substitutes` can be empty (no close swap) |
 | `GET /api/entries/:id` | | `{ entry, recipe, convertedSteps, convertedForEquipment, modifiedRecipe }`: everything the recipe page needs |
 | `GET /api/recipes/:id` | | `{ recipe }` with ingredients, steps and macros |
+
+`quality` is `close` or `rough`: show rough swaps as a weaker suggestion. `grams` keeps the calories the same. `amountAssumed` is true when the recipe has no gram amount, so 100 g was assumed. `note` is a ready-to-show sentence.
 
 A plan looks like `{ id, weekStart, calorieTarget, entries: [{ id, date, mealType, position, recipe: { id, name, calories, proteinG, carbsG, fatG, tags, equipment }, converted, modified }] }`. Show `modifiedRecipe` instead of the recipe's ingredients and steps when it is not null, and `convertedSteps` instead of the steps when not empty. A `reason` is a short sentence explaining an AI pick. Tell the user when `fromAi` is false only if it matters; the pick is still valid.
 

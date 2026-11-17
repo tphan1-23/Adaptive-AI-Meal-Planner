@@ -9,9 +9,10 @@ import { MEAL_SHARE } from "../planning/generate-plan";
 import { MEAL_TAGS } from "../planning/meal-types";
 import { formatEntry, getPlanningContext, getTasteScores, loadCandidates } from "../planning/service";
 import { rankRecipes } from "../planning/rank";
+import { describeSubstitute, findSubstitutes } from "../planning/substitution";
 import { mondayOf, toDate } from "../planning/week";
-import { convertSteps, generateRecipe, modifyRecipe } from "./adapter";
-import { getNutritionLookup } from "./lookup";
+import { convertSteps, generateRecipe, modifyRecipe, phraseSubstitution } from "./adapter";
+import { getIngredientIndex, getNutritionLookup } from "./lookup";
 import { allowRequest } from "./rate-limit";
 
 /** Each user may make this many AI calls a minute (the free Gemini tier is shared by everyone). */
@@ -192,4 +193,58 @@ export async function generateForUser(
     entry = formatEntry(created);
   }
   return { recipe, entry };
+}
+
+// ---------- ingredient substitution ----------
+
+/** The AI sentence is a nicety: if it takes longer than this the template sentence is used. */
+const PHRASING_TIMEOUT_MS = 6_000;
+
+/** Only ingredients used in at least this many recipe lines are suggested, so nobody is told to cook with antelope. */
+const MIN_POPULARITY = 15;
+
+/**
+ * Suggest swaps for one ingredient of a plan entry's recipe. The match is nearest-neighbor
+ * search on nutrition in the same category, excluding the user's allergens and respecting their
+ * diet. The AI only words the best suggestion; the others use a template, and if the AI is
+ * unavailable or the user is over their AI limit every suggestion uses the template.
+ */
+export async function suggestSubstitutes(userId: string, entryId: string, ingredient: string) {
+  const entry = await loadEntry(userId, entryId);
+  const ctx = await getPlanningContext(userId);
+
+  const modified = entry.modifiedRecipe as { ingredients?: unknown } | null;
+  const lines = parseIngredients(modified?.ingredients).length > 0
+    ? parseIngredients(modified?.ingredients)
+    : parseIngredients(entry.recipe.ingredients);
+  const wanted = ingredient.trim().toLowerCase();
+  const line = lines.find((l) => l.name.toLowerCase() === wanted);
+  if (!line) throw new HttpError(404, "That ingredient is not in this recipe");
+
+  const index = await getIngredientIndex();
+  const target = index.find(line.name);
+  if (!target) throw new HttpError(422, "No nutrition data for that ingredient");
+
+  // Recipe amounts are only usable as grams; otherwise assume 100 g and say so.
+  const amountAssumed = !(line.unit.toLowerCase() === "g" && line.quantity > 0);
+  const originalGrams = amountAssumed ? 100 : line.quantity;
+
+  const common = index.rows.filter((r) => (index.popularity.get(r.id) ?? 0) >= MIN_POPULARITY);
+  const found = findSubstitutes(target, common, { allergies: ctx.allergies, diet: ctx.diet, limit: 3 }, originalGrams);
+
+  const substitutes = found.map((s) => ({ ...s, note: describeSubstitute(target, s, originalGrams) }));
+  if (substitutes[0]?.quality === "close" && allowRequest(`ai:${userId}`, AI_CALLS_PER_MINUTE)) {
+    const phrased = await Promise.race([
+      phraseSubstitution({
+        recipeName: entry.recipe.name,
+        original: target.name,
+        substitute: substitutes[0].name,
+        grams: substitutes[0].grams,
+        originalGrams,
+      }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), PHRASING_TIMEOUT_MS)),
+    ]);
+    if (phrased) substitutes[0].note = phrased;
+  }
+  return { ingredient: line.name, matchedAs: target.name, amountAssumed, originalGrams, substitutes };
 }

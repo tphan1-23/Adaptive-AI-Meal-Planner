@@ -95,18 +95,21 @@ const ZERO_CALORIE = new Set(["water", "ice"]);
 const AGREEMENT = 0.15;
 
 /**
- * Builds a lookup over Ingredient rows. Tries, in order:
+ * Resolves an ingredient name to a row, in order:
  * 1. the exact name, then with leading words dropped, then trailing words dropped
  * 2. known aliases ("cilantro")
- * 3. a name that merely contains the words ("flour" -> "all-purpose flour"), but only when
+ * 3. water and ice, which are free
+ * 4. a name that merely contains the words ("flour" -> "all-purpose flour"), but only when
  *    the shortest such names agree on calories, so "rice" or "oil" resolve and an ambiguous
  *    word does not guess
- * The fallbacks can land on a broader food (for example "peanut butter" to "butter" if peanut
- * butter is missing), so this gives nutrition estimates only; allergen checks never rely on it.
+ * Returns "free" for water and ice, a row for everything else it can match, or undefined.
  */
-export function buildNutritionLookup(rows: IngredientRow[]): NutritionLookup {
-  const index = new Map<string, IngredientRow>();
-  const entries: { words: string[]; row: IngredientRow }[] = [];
+function makeResolver<T extends IngredientRow>(
+  rows: T[],
+  allowContaining = true,
+): (name: string) => T | "free" | undefined {
+  const index = new Map<string, T>();
+  const entries: { words: string[]; row: T }[] = [];
   for (const r of rows) {
     const k = keyOf(r.name);
     if (!k) continue;
@@ -114,7 +117,7 @@ export function buildNutritionLookup(rows: IngredientRow[]): NutritionLookup {
     entries.push({ words: k.split(" "), row: r });
   }
 
-  const containing = (candidate: string): Per100g | undefined => {
+  const containing = (candidate: string): T | undefined => {
     const want = candidate.split(" ");
     const wantsCooked = want.includes("cooked");
     const hits = entries.filter(
@@ -129,17 +132,17 @@ export function buildNutritionLookup(rows: IngredientRow[]): NutritionLookup {
     return agrees ? median : undefined;
   };
 
-  const cache = new Map<string, Per100g | undefined>();
+  const cache = new Map<string, T | "free" | undefined>();
   return (name) => {
     if (cache.has(name)) return cache.get(name);
     const candidates = nameCandidates(name);
-    let found: Per100g | undefined;
+    let found: T | "free" | undefined;
     for (const c of candidates) {
       found = index.get(c) ?? (ALIASES[c] ? index.get(ALIASES[c]) : undefined);
       if (found) break;
     }
-    if (!found) found = candidates.some((c) => ZERO_CALORIE.has(c)) ? ZERO : undefined;
-    if (!found) {
+    if (!found && candidates.some((c) => ZERO_CALORIE.has(c))) found = "free";
+    if (!found && allowContaining) {
       for (const c of candidates) {
         found = containing(ALIASES[c] ?? c);
         if (found) break;
@@ -147,6 +150,35 @@ export function buildNutritionLookup(rows: IngredientRow[]): NutritionLookup {
     }
     cache.set(name, found);
     return found;
+  };
+}
+
+/**
+ * Builds a nutrition lookup over Ingredient rows (see `makeResolver` for the matching order).
+ * The fallbacks can land on a broader food (for example "peanut butter" to "butter" if peanut
+ * butter is missing), so this gives nutrition estimates only; allergen checks never rely on it.
+ */
+export function buildNutritionLookup(rows: IngredientRow[]): NutritionLookup {
+  const resolve = makeResolver(rows);
+  return (name) => {
+    const r = resolve(name);
+    return r === "free" ? ZERO : r;
+  };
+}
+
+/**
+ * Like `buildNutritionLookup` but returns the whole row (id, category...), or undefined for water
+ * and ice. With `allowContaining: false` a generic word like "oil" is not guessed onto one
+ * specific row, which is what you want when counting how common each ingredient is.
+ */
+export function buildIngredientMatcher<T extends IngredientRow>(
+  rows: T[],
+  options: { allowContaining?: boolean } = {},
+): (name: string) => T | undefined {
+  const resolve = makeResolver(rows, options.allowContaining ?? true);
+  return (name) => {
+    const r = resolve(name);
+    return r === "free" ? undefined : r;
   };
 }
 
