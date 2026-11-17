@@ -19,6 +19,11 @@ CSCI 4397 - Software Engineering with AI.
 Next.js 14 + React + Tailwind, Next.js API routes, Supabase (Postgres + Auth) via Prisma,
 Gemini free tier (server-side only), hosted on Vercel.
 
+## Docs
+
+- [docs/architecture.md](docs/architecture.md): how the system fits together
+- [docs/api.md](docs/api.md): every API endpoint with request and response shapes
+
 ## Getting started
 
 ```bash

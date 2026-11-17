@@ -1,0 +1,214 @@
+# API reference
+
+All endpoints are Next.js route handlers under `src/app/api/`. The browser only talks to these,
+never to Gemini or the database directly.
+
+## Conventions
+
+- **Auth:** every endpoint requires a logged-in Supabase session (cookie). Without one the response is
+  `401 { "error": "Unauthorized" }`. A user only ever sees and changes their own data.
+- **Errors:** always `{ "error": "message" }`. Validation failures also include `issues` (the zod issue list).
+- **Dates:** `YYYY-MM-DD`. A "week" starts on Monday.
+- **Bodies:** JSON, with `Content-Type: application/json`.
+
+| Status | Meaning |
+| --- | --- |
+| 400 | Invalid input (or missing prerequisite, e.g. no equipment saved) |
+| 401 | Not logged in |
+| 404 | Not found, or it belongs to another user |
+| 409 | Onboarding not finished (no profile or calorie target yet) |
+| 422 | Nothing matches the filters, or an AI result failed validation. Safe to retry |
+| 429 | AI rate limit (6 calls per minute per user) or daily AI-recipe limit (10) |
+
+## Allowed values (use these exact strings in forms)
+
+| Field | Values |
+| --- | --- |
+| `sex` | `male`, `female` |
+| `activityLevel` | `sedentary`, `light`, `moderate`, `active`, `very_active` |
+| `goal` | `lose`, `maintain`, `gain` |
+| `diet` | `vegetarian`, `vegan`, `gluten-free`, `dairy-free` (or `null`) |
+| `allergies` | `peanut`, `tree-nut`, `dairy`, `egg`, `gluten`, `soy`, `fish`, `shellfish`, `sesame` |
+| `equipment` | `oven`, `stovetop`, `microwave`, `grill`, `slow-cooker`, `pressure-cooker`, `blender`, `food-processor`, `air-fryer`, `stand-mixer`, `rice-cooker`, `steamer` |
+| `cuisines` | `vietnamese`, `dominican`, `kazakh`, `russian`, `american`, `italian`, `french`, `asian`, `chinese`, `japanese`, `thai`, `korean`, `indian`, `filipino`, `indonesian`, `malaysian`, `caribbean`, `cuban`, `mexican`, `greek`, `spanish`, `german`, `middle-eastern` |
+| `mealType` | `breakfast`, `lunch`, `dinner`, `snack` |
+
+The source of truth is `src/server/db/vocab.ts`.
+
+---
+
+## Profile
+
+### `GET /api/profile`
+The logged-in user's profile, or `null` before onboarding.
+```json
+{ "profile": { "id": "…", "heightCm": 180, "weightKg": 80, "age": 30, "sex": "male",
+  "activityLevel": "moderate", "goal": "lose", "goalRateKg": 0.5, "cuisines": ["italian"],
+  "diet": "vegetarian", "allergies": ["peanut"], "equipment": ["oven"], "calorieTarget": 2209 } }
+```
+
+### `PUT /api/profile`
+Save the onboarding answers. Creates or updates the profile and computes the starting `calorieTarget`
+(Mifflin-St Jeor TDEE, adjusted for the goal, never below the safety floor). The first save also records the
+starting weight.
+```json
+{ "heightCm": 180, "weightKg": 80, "age": 30, "sex": "male", "activityLevel": "moderate",
+  "goal": "lose", "goalRateKg": 0.5,
+  "cuisines": ["vietnamese", "italian"], "diet": "vegetarian",
+  "allergies": ["peanut"], "equipment": ["oven", "stovetop"] }
+```
+Limits: `heightCm` 100-250, `weightKg` 30-300, `age` 13-100, `goalRateKg` 0-1 (kg per week, optional).
+`cuisines`, `allergies`, `equipment` default to `[]`; `diet` and `goalRateKg` may be `null` or omitted.
+Returns `{ "profile": { … } }` (same shape as GET). `400` on invalid input.
+
+---
+
+## Weigh-ins
+
+### `GET /api/logs`
+The 30 most recent weigh-ins, newest first.
+```json
+{ "logs": [ { "id": "…", "userId": "…", "weightKg": 79.6, "loggedAt": "2026-11-16T12:00:00.000Z" } ] }
+```
+
+### `POST /api/logs`
+Save a weigh-in: `{ "weightKg": 79.6 }` (30-300). Returns `201`:
+```json
+{ "log": { "id": "…", "weightKg": 79.6, "loggedAt": "…" },
+  "adjustment": { "newTarget": 2109, "changed": true, "trendKgPerWeek": -0.05,
+                  "expectedKgPerWeek": -0.5, "reason": "Weight is trending higher than your goal, so the target was lowered slightly." } }
+```
+`adjustment` is `null` unless the previous weigh-in was at least 6 days earlier, so the target changes at most
+about once a week. When evaluated, the target moves by one 100 kcal step only if the trend is more than 0.2 kg/week off
+the goal's pace. It never goes below the safety floor (1500 kcal men, 1200 women).
+
+---
+
+## Weekly plan
+
+An **entry** is one meal in a plan:
+```json
+{ "id": "…", "date": "2026-11-16", "mealType": "dinner", "position": 0,
+  "recipe": { "id": "…", "name": "Pho Bo", "calories": 480, "proteinG": 28, "carbsG": 52, "fatG": 14,
+              "tags": ["vietnamese", "asian"], "equipment": ["stovetop"] },
+  "converted": false, "modified": false }
+```
+
+### `GET /api/plan?date=YYYY-MM-DD`
+The plan for the week containing `date` (default: this week).
+```json
+{ "plan": { "id": "…", "weekStart": "2026-11-16", "calorieTarget": 2209, "entries": [ /* entries, sorted by date */ ] } }
+```
+`404` if no plan exists yet (call POST). `400` on a bad date.
+
+### `POST /api/plan`
+Plan a week of dinners, one per day. Body (all optional): `{ "date": "2026-11-16", "regenerate": false }`.
+Returns the existing plan unless `regenerate` is `true`. Respects allergies and diet, avoids recipes used in the last
+3 weeks, and favors the user's cuisines and learned tastes. Does not use the AI.
+Errors: `409` onboarding not finished, `422` no recipes match.
+
+### `POST /api/recommendation`
+One recipe for one day. Body (all optional): `{ "date", "mealType": "dinner", "extra": false }`.
+A day that already has a pick returns it, unless `extra: true`, which adds another. The AI chooses from a shortlist
+built in code and falls back to the top-ranked recipe if it is unavailable.
+```json
+{ "entry": { /* entry */ }, "reason": "Fits your calorie target and you like Italian food.", "fromAi": true }
+```
+`reason` is `null` when the day already had a pick. `fromAi` is `false` when the fallback was used.
+
+---
+
+## Recipe detail
+
+### `GET /api/entries/:id`
+Use this for the recipe page. One of the user's plan entries with the full recipe and their own changes.
+```json
+{ "entry": { /* entry */ },
+  "recipe": { "id": "…", "name": "…", "source": "dataset", "calories": 480, "proteinG": 28, "carbsG": 52, "fatG": 14,
+              "ingredients": [ { "name": "garlic", "quantity": 1, "unit": "item" } ],
+              "steps": ["…"], "tags": ["…"], "equipment": ["…"], "allergens": ["…"], "diets": ["…"] },
+  "convertedSteps": [], "convertedForEquipment": [], "modifiedRecipe": null }
+```
+Note: Food.com ingredients have **no real quantities** (`quantity: 1, unit: "item"`). Show names only for dataset recipes.
+
+### `GET /api/recipes/:id`
+`{ "recipe": { … } }` (same recipe shape). Shared recipes and the user's own AI recipes only, otherwise `404`.
+
+---
+
+## Swap, convert, modify, generate
+
+### `POST /api/swap`
+`{ "entryId": "…" }` replaces that meal with another that fits the user. Clears any conversion or modification and
+teaches the preference model. Returns `{ "entry": { … }, "reason": "…", "fromAi": true }`.
+`404` unknown entry, `422` no other recipe fits.
+
+### `POST /api/convert`
+`{ "entryId": "…" }` adapts the steps to the user's kitchen equipment (needs equipment in the profile, else `400`).
+```json
+{ "available": true, "steps": ["…"], "note": "", "cached": false }
+```
+When the AI is down or fails, `available` is `false` and `steps` are the **original** steps with a `note` to show the
+user. A successful conversion is saved on the entry, so asking again returns `cached: true` at no cost.
+
+### `POST /api/modify`
+`{ "entryId": "…", "request": "make it vegetarian" }` (`request` 3-200 characters). Creates a version of the recipe
+for this user only. Allergies are re-checked and calories recomputed in code.
+Returns `{ "entry": { … }, "modified": { /* modified recipe: name, ingredients, steps, calories, … */ } }`.
+`422` if it can't be done safely.
+
+### `DELETE /api/modify`
+`{ "entryId": "…" }` goes back to the original recipe. Returns `{ "ok": true }`.
+
+### `POST /api/generate`
+Build a brand-new AI recipe from the user's tastes. Body (all optional):
+`{ "wish": "something spicy with noodles", "date": "2026-11-18", "mealType": "dinner" }`.
+Nutrition is computed from ingredient data, not by the AI. The recipe is private to the user. With `date`, it is also
+added to that day as an extra. Returns `{ "recipe": { … }, "entry": { … } | null }`.
+`422` if the result fails validation (retry), `429` at the daily limit.
+
+---
+
+## Shopping list
+
+### `GET /api/shopping-list?weekStart=YYYY-MM-DD`
+The de-duplicated list for that week's plan. Omit `weekStart` for the most recent plan. Items already ticked stay ticked.
+```json
+{ "planId": "…", "weekStart": "2026-11-16",
+  "items": [ { "id": "…", "name": "garlic", "quantity": 3, "unit": "item", "checked": false, "mealCount": 3 } ] }
+```
+`quantity` for dataset recipes counts how many times the item is needed (placeholder units). `mealCount` is how many
+planned meals use it. `404` if the user has no plan.
+
+### `PATCH /api/shopping-list`
+`{ "itemId": "…", "checked": true }` ticks or unticks an item. Returns `{ "ok": true }`, or `404` if the item isn't theirs.
+
+---
+
+## Preference learning
+
+### `POST /api/signals`
+Record how the user reacted to a recipe: `{ "recipeId": "…", "type": "favorite" }`.
+`type` is `favorite`, `skip`, `swap_in`, `swap_out` or `rating` (a rating also needs `"value": 1-5`).
+Generic dataset tags (`cuisine`, `course`, `30-minutes-or-less`, `vegan`, …) are ignored.
+Returns `201 { "updatedTags": { "italian": 0.1, "pasta": 0.1 } }`. `404` if the recipe isn't visible to the user.
+
+### `GET /api/signals`
+```json
+{ "affinity": { "italian": 0.3, "spicy": -0.1 }, "liked": ["italian"], "disliked": ["spicy"] }
+```
+
+---
+
+## Typical flows
+
+**First run:** `PUT /api/profile` → `POST /api/plan` → `GET /api/plan` → `GET /api/shopping-list`.
+
+**Recipe page:** `GET /api/entries/:id` → optionally `POST /api/convert` or `POST /api/modify`.
+
+**Weekly check-in:** `POST /api/logs` with the new weight, then re-read `GET /api/profile` for the updated target.
+
+## Not built yet
+
+- Logging what was actually eaten (meal logs) and the planned-versus-actual dashboard data.
+- Real ingredient quantities for dataset recipes.
