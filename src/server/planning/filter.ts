@@ -1,4 +1,5 @@
 import type { PlanningProfile, RecipeLite } from "@/types";
+import { allergyKeywords, normalizeAllergies } from "./allergens";
 
 const norm = (s: string) => s.trim().toLowerCase();
 
@@ -14,7 +15,7 @@ export function filterRecipes(
   profile: Pick<PlanningProfile, "diet" | "allergies">,
   excludeIds: ReadonlySet<string> = new Set(),
 ): RecipeLite[] {
-  const allergies = new Set(profile.allergies.map(norm));
+  const allergies = new Set(normalizeAllergies(profile.allergies));
   const diet = profile.diet ? norm(profile.diet) : null;
 
   return recipes.filter((r) => {
@@ -27,9 +28,9 @@ export function filterRecipes(
 
 /** True if any ingredient name mentions one of the user's allergens. Used to re-check AI output. */
 export function ingredientsHaveAllergen(ingredientNames: string[], allergies: string[]): boolean {
-  const al = allergies.map(norm).filter(Boolean);
+  const keywords = allergyKeywords(allergies);
   return ingredientNames.some((n) => {
     const name = norm(n);
-    return al.some((a) => name.includes(a));
+    return keywords.some((k) => name.includes(k));
   });
 }
