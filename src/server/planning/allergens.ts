@@ -24,8 +24,15 @@ const KEYWORDS: Record<Allergen, string[]> = {
   soy: ["soy", "tofu", "tempeh", "edamame", "miso"],
   egg: ["egg", "mayonnaise", "meringue"],
   sesame: ["sesame", "tahini"],
-  fish: ["fish", "salmon", "tuna", "cod", "anchovy", "anchovies", "sardine", "trout", "tilapia", "halibut"],
-  shellfish: ["shrimp", "prawn", "crab", "lobster", "clam", "mussel", "oyster", "scallop", "crayfish"],
+  fish: [
+    "fish", "salmon", "tuna", "cod", "anchovy", "anchovies", "sardine", "trout", "tilapia", "halibut", "bass", "snapper",
+    "mackerel", "herring", "perch", "pike", "swordfish", "catfish", "carp", "eel", "mahi", "pollock", "haddock", "flounder",
+    "sole", "sturgeon", "roe", "caviar", "grouper", "whiting", "bonito", "smelt", "shad", "pompano", "tilefish", "sablefish",
+  ],
+  shellfish: [
+    "shrimp", "prawn", "crab", "lobster", "clam", "mussel", "oyster", "scallop", "crayfish", "crawfish", "squid", "octopus",
+    "calamari", "abalone", "conch", "cuttlefish", "snail", "escargot", "krill", "langoustine", "shellfish",
+  ],
   "tree-nut": ["almond", "walnut", "pecan", "cashew", "pistachio", "hazelnut", "macadamia", "pine nut", "brazil nut"],
   peanut: ["peanut", "groundnut"],
 };

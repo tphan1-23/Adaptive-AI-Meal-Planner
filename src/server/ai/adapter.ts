@@ -221,3 +221,30 @@ export async function generateRecipe(
     return null;
   }
 }
+
+// ---------- substitution wording ----------
+
+/**
+ * One friendly sentence describing a swap that the code has already chosen. The AI does not
+ * pick or judge the match; it only words it. Returns null if the AI is unavailable or the
+ * sentence does not mention the substitute, and the caller uses a template.
+ */
+export async function phraseSubstitution(
+  input: { recipeName: string; original: string; substitute: string; grams: number; originalGrams: number },
+  llm: Llm = callGemini,
+): Promise<string | null> {
+  try {
+    const out = await ask(
+      llm,
+      `Write ONE short, friendly sentence suggesting this ingredient swap in a recipe. Use only these facts and add no others. ` +
+        `Reply JSON {"sentence": string}.\n` +
+        `Recipe: ${JSON.stringify(clip(input.recipeName, 120))}. Original: ${JSON.stringify(clip(input.original, 80))} ` +
+        `(${Math.round(input.originalGrams)} g). Swap for: ${JSON.stringify(clip(input.substitute, 80))} (${Math.round(input.grams)} g, same calories).`,
+      z.object({ sentence: z.string().min(5) }),
+    );
+    const sentence = clip(out.sentence, 300);
+    return sentence.toLowerCase().includes(input.substitute.toLowerCase()) ? sentence : null;
+  } catch {
+    return null;
+  }
+}

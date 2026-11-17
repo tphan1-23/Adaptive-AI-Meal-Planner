@@ -27,6 +27,10 @@ describe("allergy names", () => {
     expect(ingredientsHaveAllergen(["Greek yogurt"], ["milk"])).toBe(true);
     expect(ingredientsHaveAllergen(["rice", "chicken"], ["milk", "nuts"])).toBe(false);
   });
+  it("recognises less common fish and shellfish", () => {
+    expect(ingredientsHaveAllergen(["Sea bass fillet", "squid rings"], ["fish"])).toBe(true);
+    expect(ingredientsHaveAllergen(["squid"], ["shellfish"])).toBe(true);
+  });
   it("includes the canonical label itself as a keyword", () => {
     expect(allergyKeywords(["shrimp"])).toContain("shellfish");
   });
