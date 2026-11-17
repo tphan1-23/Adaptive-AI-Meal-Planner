@@ -68,8 +68,14 @@ export function simplifyName(description: string): string {
   let name: string;
   if (base === "oil") name = q ? `${q} oil` : "oil";
   else if (base === "spices" || base === "herbs") {
-    // "Spices, pepper, black" -> "black pepper"; "Spices, cinnamon, ground" -> "cinnamon"
-    name = q ? (rest[1] && SPICE_COLOURS.has(rest[1]) ? `${rest[1]} ${q}` : q) : base;
+    // "Spices, pepper, black" -> "black pepper"; "Spices, cinnamon, ground" -> "cinnamon".
+    // Ground ginger keeps "ground" so plain "ginger" can mean fresh ginger root.
+    name = q ? (rest[1] && SPICE_COLOURS.has(rest[1]) ? `${rest[1]} ${q}` : q === "ginger" ? "ground ginger" : q) : base;
+  } else if (base === "ginger root") name = "ginger";
+  else if (base === "egg" || base === "eggs") {
+    // Keep the part: plain "egg" must mean a whole chicken egg (143 kcal), not yolk or white.
+    const kind = rest.find((p) => ["yolk", "white", "duck", "goose", "quail", "turkey", "scrambled"].includes(p));
+    name = kind === "yolk" || kind === "white" ? `egg ${kind}` : kind ? `${kind} egg` : "egg";
   } else if (base === "sugars") name = q ? `${q} sugar` : "sugar";
   else if (base.endsWith("flour") && /all-purpose/.test(d)) name = "all-purpose flour";
   else if (base.endsWith("flour") && /bread flour|bread, /.test(d)) name = "bread flour";
@@ -107,8 +113,19 @@ export function isUsefulSweet(description: string): boolean {
   return /^(sugars?|honey|molasses|syrups?, (maple|corn|table blends))\b/i.test(description);
 }
 
-/** Rank candidates that simplify to the same name: raw first, then the shortest description. */
+/**
+ * Dried, powdered or dehydrated versions (about 5x the calories per 100 g of the fresh food).
+ * Spices are dried by nature, so they do not count.
+ */
+export function isDried(description: string): boolean {
+  const d = description.toLowerCase();
+  if (/^(spices|herbs),/.test(d)) return false;
+  return /\b(dry|dried|dehydrated|powder|powdered|freeze-dried|flakes|concentrate|condensed|evaporated)\b/.test(d);
+}
+
+/** Rank candidates that simplify to the same name: raw first, dried last, then the shortest description. */
 export function preferenceScore(description: string): number {
   const p = preparationOf(description);
-  return (p === "raw" ? 0 : p === "other" ? 1000 : 2000) + description.length;
+  const meatOnly = /meat only/i.test(description) ? -30 : 0; // plain "chicken breast" = meat, not skin
+  return (p === "raw" ? 0 : p === "other" ? 1000 : 2000) + (isDried(description) ? 5000 : 0) + meatOnly + description.length;
 }

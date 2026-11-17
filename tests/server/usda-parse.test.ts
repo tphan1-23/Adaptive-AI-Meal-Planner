@@ -3,6 +3,7 @@ import {
   categoryFor,
   ingredientName,
   isBrandOrJunk,
+  isDried,
   isUsefulSweet,
   preferenceScore,
   preparationOf,
@@ -42,6 +43,37 @@ describe("preparation and preference", () => {
   it("prefers raw over cooked, then shorter descriptions", () => {
     expect(preferenceScore("Beef, raw")).toBeLessThan(preferenceScore("Beef, cooked"));
     expect(preferenceScore("Beef, raw")).toBeLessThan(preferenceScore("Beef, ground, raw"));
+  });
+});
+
+describe("plain names mean the fresh food, not the dried one", () => {
+  it("keeps egg parts apart so plain egg is a whole egg", () => {
+    expect(simplifyName("Egg, whole, raw, fresh")).toBe("egg");
+    expect(simplifyName("Egg, yolk, raw, fresh")).toBe("egg yolk");
+    expect(simplifyName("Egg, white, raw, fresh")).toBe("egg white");
+    expect(simplifyName("Egg, duck, whole, fresh, raw")).toBe("duck egg");
+  });
+  it("separates ginger root from ground ginger", () => {
+    expect(simplifyName("Ginger root, raw")).toBe("ginger");
+    expect(simplifyName("Spices, ginger, ground")).toBe("ground ginger");
+  });
+  it("detects dried forms but not spices", () => {
+    expect(isDried("Milk, dry, whole, with added vitamin D")).toBe(true);
+    expect(isDried("Egg, whole, dried")).toBe(true);
+    expect(isDried("Onions, dehydrated flakes")).toBe(true);
+    expect(isDried("Milk, whole, 3.25% milkfat")).toBe(false);
+    expect(isDried("Spices, ginger, ground")).toBe(false);
+  });
+  it("ranks dried versions last for the same name", () => {
+    expect(preferenceScore("Milk, whole, 3.25% milkfat, with added vitamin D")).toBeLessThan(
+      preferenceScore("Milk, dry, whole, with added vitamin D"),
+    );
+    expect(preferenceScore("Egg, whole, raw, fresh")).toBeLessThan(preferenceScore("Egg, whole, dried"));
+  });
+  it("prefers meat-only chicken", () => {
+    expect(preferenceScore("Chicken, broilers or fryers, breast, meat only, raw")).toBeLessThan(
+      preferenceScore("Chicken, broilers or fryers, breast, meat and skin, raw"),
+    );
   });
 });
 

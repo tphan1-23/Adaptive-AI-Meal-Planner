@@ -12,7 +12,7 @@ import path from "node:path";
 import { parse } from "csv-parse";
 import { PrismaClient } from "@prisma/client";
 import {
-  CATEGORY_MAP, NUTRIENT, categoryFor, ingredientName, isBrandOrJunk, isUsefulSweet, preferenceScore,
+  CATEGORY_MAP, NUTRIENT, categoryFor, ingredientName, isBrandOrJunk, isDried, isUsefulSweet, preferenceScore,
 } from "../src/server/db/usda-parse";
 
 const DRY_RUN = process.argv.includes("--dry-run");
@@ -70,8 +70,8 @@ async function main() {
     if (f) f.nutrients[key] = Number(r.amount);
   }
 
-  // Keep complete rows only, then one row per simplified name (raw preferred, shortest description).
-  const best = new Map<string, Candidate>();
+  // Keep complete rows only.
+  const complete: Candidate[] = [];
   let incomplete = 0;
   for (const f of foods.values()) {
     const n = f.nutrients;
@@ -79,6 +79,17 @@ async function main() {
       incomplete++;
       continue;
     }
+    complete.push(f);
+  }
+
+  // If a plain name has both a fresh and a dried version (milk vs dried milk), the dried one
+  // gets an explicit "dried ..." name so it can never win the plain name with ~5x the calories.
+  const hasFresh = new Set(complete.filter((f) => !isDried(f.description)).map((f) => f.name));
+  for (const f of complete) if (isDried(f.description) && hasFresh.has(f.name)) f.name = `dried ${f.name}`;
+
+  // One row per name (raw preferred, dried last, then the shortest description).
+  const best = new Map<string, Candidate>();
+  for (const f of complete) {
     const cur = best.get(f.name);
     if (!cur || preferenceScore(f.description) < preferenceScore(cur.description)) best.set(f.name, f);
   }
@@ -94,7 +105,7 @@ async function main() {
     console.log(`  ${c.name.padEnd(32)} ${c.category.padEnd(10)} ${String(c.nutrients.kcal).padStart(5)} kcal   <- ${c.description.slice(0, 60)}`);
 
   const dump = process.argv.indexOf("--dump");
-  if (dump > 0) fs.writeFileSync(process.argv[dump + 1], JSON.stringify(chosen.map((c) => c.name)));
+  if (dump > 0) fs.writeFileSync(process.argv[dump + 1], JSON.stringify(chosen.map((c) => ({ name: c.name, kcal: c.nutrients.kcal, description: c.description })), null, 1));
 
   if (DRY_RUN) {
     console.log("Dry run: nothing written.");
@@ -117,7 +128,11 @@ async function main() {
       written++;
       if (written % 200 === 0) process.stdout.write(`\r  upserted ${written}/${chosen.length}`);
     }
-    console.log(`\nDone. ${written} ingredients written.`);
+    // Remove rows an earlier run imported that the current rules no longer choose.
+    const stale = await prisma.ingredient.deleteMany({
+      where: { fdcId: { not: null, notIn: chosen.map((c) => c.fdcId) } },
+    });
+    console.log(`\nDone. ${written} ingredients written, ${stale.count} stale rows removed.`);
   } finally {
     await prisma.$disconnect();
   }
