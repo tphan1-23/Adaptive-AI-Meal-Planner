@@ -1,5 +1,6 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { dropMalformedAuthCookies } from "./cookies";
 
 /** Supabase client for route handlers and server components, bound to the request cookies. */
 export function createSupabaseServer() {
@@ -9,7 +10,7 @@ export function createSupabaseServer() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll: () => cookieStore.getAll(),
+        getAll: () => dropMalformedAuthCookies(cookieStore.getAll()),
         setAll: (list: { name: string; value: string; options: CookieOptions }[]) => {
           try {
             list.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
