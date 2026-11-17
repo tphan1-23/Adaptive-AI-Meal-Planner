@@ -16,7 +16,10 @@ const normalizeName = (s: string) =>
   s.toLowerCase().replace(/\([^)]*\)/g, " ").replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
 
 /** "tomatoes" -> "tomato", "berries" -> "berry", "grass" stays. */
+const IRREGULAR: Record<string, string> = { halves: "half", leaves: "leaf", loaves: "loaf" };
+
 function singular(word: string): string {
+  if (IRREGULAR[word]) return IRREGULAR[word];
   if (word.length > 3 && word.endsWith("ies")) return `${word.slice(0, -3)}y`;
   if (word.length > 3 && /(oes|ches|shes|xes|sses)$/.test(word)) return word.slice(0, -2);
   if (word.length > 2 && word.endsWith("s") && !word.endsWith("ss")) return word.slice(0, -1);
@@ -71,24 +74,79 @@ export function nameCandidates(name: string): string[] {
   return out;
 }
 
+/** Recipe wording that USDA names differently. Keys and values are normalized names. */
+const ALIASES: Record<string, string> = {
+  cilantro: "coriander cilantro leave",
+  gingerroot: "ginger root",
+  scallion: "onion",
+  "spring onion": "onion",
+  "green onion": "onion",
+  chickpea: "chickpea garbanzo bean",
+  garbanzo: "chickpea garbanzo bean",
+  flour: "all-purpose flour",
+  "fresh ginger": "ginger root", // plain "ginger" is the dried spice in the USDA table
+};
+
+const ZERO: Per100g = { calories: 0, proteinG: 0, carbsG: 0, fatG: 0 };
+/** Foods with no meaningful calories that USDA may not list under these names. */
+const ZERO_CALORIE = new Set(["water", "ice"]);
+
+/** Rows whose names agree on calories within this fraction count as one answer. */
+const AGREEMENT = 0.15;
+
 /**
- * Builds a lookup over Ingredient rows. Tries an exact match first and then falls back by
- * dropping leading, then trailing, words. The fallback can match a broader food (for example
- * "peanut butter" to "butter" if peanut butter is missing), so it gives nutrition estimates
- * only; allergen checks never rely on it.
+ * Builds a lookup over Ingredient rows. Tries, in order:
+ * 1. the exact name, then with leading words dropped, then trailing words dropped
+ * 2. known aliases ("cilantro")
+ * 3. a name that merely contains the words ("flour" -> "all-purpose flour"), but only when
+ *    the shortest such names agree on calories, so "rice" or "oil" resolve and an ambiguous
+ *    word does not guess
+ * The fallbacks can land on a broader food (for example "peanut butter" to "butter" if peanut
+ * butter is missing), so this gives nutrition estimates only; allergen checks never rely on it.
  */
 export function buildNutritionLookup(rows: IngredientRow[]): NutritionLookup {
-  const index = new Map<string, Per100g>();
+  const index = new Map<string, IngredientRow>();
+  const entries: { words: string[]; row: IngredientRow }[] = [];
   for (const r of rows) {
     const k = keyOf(r.name);
-    if (k && !index.has(k)) index.set(k, r);
+    if (!k) continue;
+    if (!index.has(k)) index.set(k, r);
+    entries.push({ words: k.split(" "), row: r });
   }
+
+  const containing = (candidate: string): Per100g | undefined => {
+    const want = candidate.split(" ");
+    const wantsCooked = want.includes("cooked");
+    const hits = entries.filter(
+      (e) => want.every((w) => e.words.includes(w)) && (wantsCooked || !e.words.includes("cooked")),
+    );
+    if (hits.length === 0) return undefined;
+    const shortest = Math.min(...hits.map((h) => h.words.length));
+    const group = hits.filter((h) => h.words.length === shortest).map((h) => h.row);
+    const sorted = [...group].sort((x, y) => x.calories - y.calories);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const agrees = group.every((g) => Math.abs(g.calories - median.calories) <= AGREEMENT * Math.max(median.calories, 1));
+    return agrees ? median : undefined;
+  };
+
+  const cache = new Map<string, Per100g | undefined>();
   return (name) => {
-    for (const c of nameCandidates(name)) {
-      const hit = index.get(c);
-      if (hit) return hit;
+    if (cache.has(name)) return cache.get(name);
+    const candidates = nameCandidates(name);
+    let found: Per100g | undefined;
+    for (const c of candidates) {
+      found = index.get(c) ?? (ALIASES[c] ? index.get(ALIASES[c]) : undefined);
+      if (found) break;
     }
-    return undefined;
+    if (!found) found = candidates.some((c) => ZERO_CALORIE.has(c)) ? ZERO : undefined;
+    if (!found) {
+      for (const c of candidates) {
+        found = containing(ALIASES[c] ?? c);
+        if (found) break;
+      }
+    }
+    cache.set(name, found);
+    return found;
   };
 }
 
