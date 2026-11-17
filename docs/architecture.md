@@ -45,11 +45,15 @@ If Gemini is unavailable, rate limited or returns an invalid result, the app sti
 Required env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `DATABASE_URL`, `DIRECT_URL`, `GEMINI_API_KEY`.
 
 ### Planning engine (`src/server/planning`)
-Pure functions over plain `RecipeLite` objects (see `src/types`), unit tested without a database.
+Pure functions over plain `RecipeLite` objects (see `src/types`), unit tested without a database. Checked against the real recipe table (about 20,000 recipes): a week plans in well under 100 ms and every day lands within a few kcal of the target.
 
-1. `filter.ts` `filterRecipes`: removes recipes containing the user's allergens, keeps only the user's diet, drops excluded ids. Equipment is never a filter.
-2. `rank.ts` `rankRecipes`: score = relative calorie error minus `0.05 x` summed tag affinity. Lower is better, ties break on id. The affinity map comes from `server/adherence`.
-3. `generate-plan.ts` `generatePlan`: one recipe per day, sized to the meal's share of the daily target (`MEAL_SHARE`, dinner = 40%), no repeats until the pool is exhausted.
+1. `allergens.ts`: the canonical allergen labels used by the recipe import (`gluten`, `dairy`, `soy`, `egg`, `sesame`, `fish`, `shellfish`, `tree-nut`, `peanut`). `normalizeAllergies` maps what a user types ("milk", "nuts", "shrimp") onto them. **Onboarding should offer exactly these labels**, because recipes are matched on them. `allergyKeywords` powers the ingredient-name check on AI recipes.
+2. `filter.ts` `filterRecipes`: removes recipes containing the user's allergens, keeps only the user's diet (`vegetarian`, `vegan`, `dairy-free`, `gluten-free`), drops excluded ids. Equipment is never a filter.
+3. `meal-types.ts` `fitsMeal`: only recipes tagged for the meal are used (dinner: `main-dish`, `one-dish-meal`, `soups-stews`), so a chutney never lands as dinner. If nothing is tagged for the meal, every allowed recipe is used.
+4. `rank.ts` `rankRecipes`: score = relative calorie error minus `0.05 x` summed tag affinity. Lower is better, ties break on id. The affinity map comes from `server/adherence`.
+5. `generate-plan.ts` `generatePlan`: one recipe per day, sized to the meal's share of the daily target (`MEAL_SHARE`, dinner = 40%). Pass `seed` (for example `userId:weekStart`) to draw the week from the top candidates in a repeatable shuffle, so the same week is stable but the next week differs. Pass `excludeIds` with recently used recipes. Recipes are not repeated within a plan unless the pool runs out.
+
+Notes for the routes: loading every recipe takes about 2 seconds, so routes should narrow the query in SQL first (own AI recipes or `ownerId` null, allergens, diet, a calorie range around the meal target) and rank only that set. Dataset tags are noisy: affinity should ignore generic tags such as `cuisine`, `preparation`, `course` and `time-to-make`. Ingredient quantities in the dataset are placeholders (`1 item`), so shopping lists and the AI modify/convert prompts do not have real amounts yet.
 
 ### AI layer (`src/server/ai`)
 Receives only the ranked shortlist. Falls back to the code-based result on any failure (see Failure handling). Four jobs:
