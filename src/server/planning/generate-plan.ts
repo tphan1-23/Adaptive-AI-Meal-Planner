@@ -2,6 +2,7 @@ import type { MealType, PlannedDay, PlanningProfile, RecipeLite, TagAffinity } f
 import { filterRecipes } from "./filter";
 import { fitsMeal } from "./meal-types";
 import { rankRecipes } from "./rank";
+import { addDays } from "./week";
 
 /** Share of the daily calorie target one meal should cover. */
 export const MEAL_SHARE: Record<MealType, number> = {
@@ -29,12 +30,6 @@ export interface GeneratePlanInput {
   seed?: string;
   /** How many top candidates the seeded shuffle draws from. Default max(25, days * 3). */
   candidates?: number;
-}
-
-function addDays(iso: string, n: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
 }
 
 /** Small seeded PRNG (mulberry32) so a seed always gives the same shuffle. */

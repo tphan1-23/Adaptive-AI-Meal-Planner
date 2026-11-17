@@ -52,3 +52,9 @@ export function allergyKeywords(allergies: string[]): string[] {
   }
   return [...kws];
 }
+
+/** Canonical allergens that appear to be in a list of ingredient names (for AI-written recipes). */
+export function detectAllergens(ingredientNames: string[]): Allergen[] {
+  const names = ingredientNames.map(clean);
+  return ALLERGENS.filter((a) => KEYWORDS[a].some((k) => names.some((n) => n.includes(k))));
+}

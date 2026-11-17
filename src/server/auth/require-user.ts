@@ -1,6 +1,16 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "./supabase-server";
 
+/** Throw from a service to answer with this status and message. `withUser` turns it into JSON. */
+export class HttpError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export class UnauthorizedError extends Error {
   constructor() {
     super("Unauthorized");
@@ -27,6 +37,9 @@ export function withUser<A extends unknown[]>(
     } catch (e) {
       if (e instanceof UnauthorizedError) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      if (e instanceof HttpError) {
+        return NextResponse.json({ error: e.message }, { status: e.status });
       }
       throw e;
     }

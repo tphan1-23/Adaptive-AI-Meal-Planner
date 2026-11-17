@@ -53,7 +53,7 @@ Pure functions over plain `RecipeLite` objects (see `src/types`), unit tested wi
 4. `rank.ts` `rankRecipes`: score = relative calorie error minus `0.05 x` summed tag affinity. Lower is better, ties break on id. The affinity map comes from `server/adherence`.
 5. `generate-plan.ts` `generatePlan`: one recipe per day, sized to the meal's share of the daily target (`MEAL_SHARE`, dinner = 40%). Pass `seed` (for example `userId:weekStart`) to draw the week from the top candidates in a repeatable shuffle, so the same week is stable but the next week differs. Pass `excludeIds` with recently used recipes. Recipes are not repeated within a plan unless the pool runs out.
 
-Notes for the routes: loading every recipe takes about 2 seconds, so routes should narrow the query in SQL first (own AI recipes or `ownerId` null, allergens, diet, a calorie range around the meal target) and rank only that set. Dataset tags are noisy: affinity should ignore generic tags such as `cuisine`, `preparation`, `course` and `time-to-make`. Ingredient quantities in the dataset are placeholders (`1 item`), so shopping lists and the AI modify/convert prompts do not have real amounts yet.
+Loading every recipe takes about 2 seconds, so the services narrow the query in SQL first and rank only that set. Ingredient quantities in the dataset are placeholders (`1 item`), so shopping lists and the AI modify/convert prompts do not have real amounts yet.
 
 ### AI layer (`src/server/ai`)
 Receives only the ranked shortlist. Falls back to the code-based result on any failure (see Failure handling). Four jobs:
@@ -63,11 +63,36 @@ Receives only the ranked shortlist. Falls back to the code-based result on any f
 - **Generate** a new recipe from the user's tastes (top tag affinities, favorites) and a few dataset recipes. Saved as a private `Recipe` (`source = "ai"`, `ownerId` = the user, `basedOnIds` = the inspiration recipes). Nutrition is never taken from the AI: it is computed in code from `Ingredient`. Rejected if it contains an allergen or an ingredient we cannot match.
 
 Files:
-- `gemini.ts`: the only code that calls Gemini (server-side). Uses the `gemini-flash-latest` alias and tries `gemini-flash-lite-latest` if the first fails. Set `GEMINI_MODEL` to force one model. 20 second timeout per call.
+- `gemini.ts`: the only code that calls Gemini (server-side). Uses the `gemini-flash-latest` alias and tries `gemini-flash-lite-latest` if the first fails. Set `GEMINI_MODEL` to force one model. 15 second timeout per call. A model that returns quota (429) or overload (503) errors is skipped for 60 seconds so users do not wait on a model that is down. The free tier's quota is small and can run out during heavy testing, in which case every AI feature falls back to its code-based result (that is by design, see Failure handling).
 - `adapter.ts`: `chooseRecipe`, `convertSteps`, `modifyRecipe`, `generateRecipe`. Each takes an injectable `llm` function (tests use a fake), parses the reply with Zod and falls back safely: top-ranked recipe, original steps, or `null` for modify/generate. Prompts carry recipe and preference data only, never a name, email or user id. Free-text user requests are clipped and sent as quoted data.
 - `nutrition.ts`: `buildNutritionLookup(rows)` turns `Ingredient` rows into the name lookup, and `computeNutrition` sums per-100g data over ingredient weights (returns `null` if any ingredient is unknown). Matching, in order: the exact name; leading words dropped ("ground cumin" becomes "cumin"); trailing words dropped; known synonyms (cilantro, scallion, gingerroot, plain "flour" is all-purpose); then any ingredient whose name contains the words ("oil", "cumin" to "cumin seed"), but only when the shortest such names agree on calories, so an ambiguous word is left unmatched rather than guessed. Plurals, punctuation and portion words are handled ("garlic cloves" is garlic, not the spice clove; "ground cloves" is the spice), cooked variants are skipped unless the recipe says cooked, and water is 0 kcal. These fallbacks can land on a broader food, so they are for nutrition estimates only; allergen checks never use them. Against the full USDA import, about 92% of ingredient lines across all dataset recipes match. Known data issue: some plain USDA names are the dried version (`milk` 496 kcal, `egg` 322, `ginger` 335), which the lookup cannot detect.
 
 Checks applied in code to AI output: the chosen id must be in the shortlist, allergens are re-checked on modified and generated recipes (`ingredientsHaveAllergen`), generated recipes are rejected if calories land more than 35% from the target, and modified recipes recompute calories when every ingredient is in grams (otherwise the original calories are kept and `caloriesVerified` is false).
+
+### Services (database plus the engines above)
+- `planning/service.ts`: `createWeekPlan`, `getWeekPlan`, `recommendForDay`, `swapEntry`, `getRecipeForUser`, `getEntryDetail`. Candidates are narrowed in SQL (visible recipes, calorie window around the meal target, meal tags, allergens, diet) and filtered again in code. Recipes used in the previous 3 weeks are skipped. Taste scores are the learned affinity plus a +1 boost for each cuisine chosen at onboarding. Plans start on a Monday.
+- `ai/service.ts`: `convertEntry`, `modifyEntry`, `resetModification`, `generateForUser`. Every entry is looked up with its `userId`, so another user's entry or private AI recipe is a 404. AI calls are limited to 6 a minute per user (`ai/rate-limit.ts`, the free Gemini tier is shared by everyone) and 10 generated recipes a day.
+- `ai/lookup.ts`: builds the ingredient lookup from the `Ingredient` table and reuses it for 10 minutes.
+- Services throw `HttpError(status, message)`; `withUser` turns it into a JSON error response.
+
+## API routes
+All routes need a logged-in user (401 otherwise) and only ever touch that user's data. Errors are `{ error: string }`. Dates are `YYYY-MM-DD`. A "plan entry" is one recipe on one day.
+
+| Route | Body or query | Returns |
+| --- | --- | --- |
+| `GET /api/plan?date=` | date optional (default today) | `{ plan }` for that week, or 404 if none yet |
+| `POST /api/plan` | `{ date?, regenerate? }` | `{ plan }`: 7 dinners, one per day. Returns the existing plan unless `regenerate` is true. 409 if onboarding is unfinished |
+| `POST /api/recommendation` | `{ date?, mealType?, extra? }` | `{ entry, reason, fromAi }`. A day with a pick returns it; `extra: true` adds another recipe that day |
+| `POST /api/swap` | `{ entryId }` | `{ entry, reason, fromAi }`: a new recipe in place of the old one |
+| `POST /api/convert` | `{ entryId }` | `{ available, steps, note, cached }`: steps for the user's equipment. 400 if no equipment in the profile |
+| `POST /api/modify` | `{ entryId, request }` | `{ entry, modified }` for a change like "make it spicier". 422 if it fails the allergy checks. `DELETE` with `{ entryId }` undoes it |
+| `POST /api/generate` | `{ wish?, date?, mealType? }` | `{ recipe, entry }`: a new private AI recipe. With `date` it is also added to that day. 422: try again |
+| `GET /api/entries/:id` | | `{ entry, recipe, convertedSteps, convertedForEquipment, modifiedRecipe }`: everything the recipe page needs |
+| `GET /api/recipes/:id` | | `{ recipe }` with ingredients, steps and macros |
+
+A plan looks like `{ id, weekStart, calorieTarget, entries: [{ id, date, mealType, position, recipe: { id, name, calories, proteinG, carbsG, fatG, tags, equipment }, converted, modified }] }`. Show `modifiedRecipe` instead of the recipe's ingredients and steps when it is not null, and `convertedSteps` instead of the steps when not empty. A `reason` is a short sentence explaining an AI pick. Tell the user when `fromAi` is false only if it matters; the pick is still valid.
+
+Other routes owned by the backend lane: `/api/profile`, `/api/logs`, `/api/signals`, `/api/shopping-list`.
 
 ## Data model (`prisma/schema.prisma`)
 

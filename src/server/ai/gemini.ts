@@ -2,7 +2,11 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // Aliases track the current Flash models. The lite model is tried when the main one is busy.
 const DEFAULT_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest"];
-const TIMEOUT_MS = 20_000;
+const TIMEOUT_MS = 15_000;
+/** After a quota (429) or overload (503) error, skip that model for this long. */
+const COOLDOWN_MS = 60_000;
+
+const coolingUntil = new Map<string, number>();
 
 async function generate(client: GoogleGenerativeAI, modelName: string, prompt: string): Promise<string> {
   const model = client.getGenerativeModel({
@@ -16,24 +20,41 @@ async function generate(client: GoogleGenerativeAI, modelName: string, prompt: s
   return result.response.text();
 }
 
+function isOverloaded(e: unknown): boolean {
+  const msg = String((e as { message?: string })?.message ?? e);
+  return /\b(429|503)\b/.test(msg) || msg.includes("timeout");
+}
+
 /**
  * The only place that calls Gemini. Server-side only: the key never reaches the browser.
- * Returns the raw JSON text. Tries each model once (GEMINI_MODEL overrides the list) and
- * throws if all fail, and the adapter turns that into its code-based fallback.
+ * Returns the raw JSON text. Tries each model once (GEMINI_MODEL overrides the list), skipping
+ * models that recently hit quota or overload, and throws if all fail, and the adapter turns
+ * that into its code-based fallback.
  */
 export async function callGemini(prompt: string): Promise<string> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("GEMINI_API_KEY is not set");
 
   const client = new GoogleGenerativeAI(key);
-  const models = process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL] : DEFAULT_MODELS;
+  const all = process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL] : DEFAULT_MODELS;
+  const now = Date.now();
+  const ready = all.filter((m) => (coolingUntil.get(m) ?? 0) <= now);
+  // If every model is cooling down, try them anyway rather than failing without a call.
+  const models = ready.length > 0 ? ready : all;
+
   let lastError: unknown;
   for (const name of models) {
     try {
       return await generate(client, name, prompt);
     } catch (e) {
       lastError = e;
+      if (isOverloaded(e)) coolingUntil.set(name, Date.now() + COOLDOWN_MS);
     }
   }
   throw lastError;
+}
+
+/** Test helper. */
+export function resetGeminiCooldowns() {
+  coolingUntil.clear();
 }
