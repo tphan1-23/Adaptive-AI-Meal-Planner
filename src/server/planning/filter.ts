@@ -1,5 +1,5 @@
 import type { PlanningProfile, RecipeLite } from "@/types";
-import { allergyKeywords, normalizeAllergies } from "./allergens";
+import { anyIngredientHasAllergen, normalizeAllergies } from "./allergens";
 
 const norm = (s: string) => s.trim().toLowerCase();
 
@@ -26,11 +26,7 @@ export function filterRecipes(
   });
 }
 
-/** True if any ingredient name mentions one of the user's allergens. Used to re-check AI output. */
+/** True if any ingredient name contains one of the user's allergens. Used to re-check recipes and AI output. */
 export function ingredientsHaveAllergen(ingredientNames: string[], allergies: string[]): boolean {
-  const keywords = allergyKeywords(allergies);
-  return ingredientNames.some((n) => {
-    const name = norm(n);
-    return keywords.some((k) => name.includes(k));
-  });
+  return anyIngredientHasAllergen(ingredientNames, allergies);
 }

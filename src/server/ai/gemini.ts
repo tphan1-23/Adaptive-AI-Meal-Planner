@@ -3,8 +3,10 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 // Aliases track the current Flash models. The lite model is tried when the main one is busy.
 const DEFAULT_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest"];
 const TIMEOUT_MS = 15_000;
-/** After a quota (429) or overload (503) error, skip that model for this long. */
+/** After an overload (503) or timeout, skip that model for this long. */
 const COOLDOWN_MS = 60_000;
+/** A quota error (429) usually lasts longer, so rest the model longer. */
+const QUOTA_COOLDOWN_MS = 5 * 60_000;
 
 const coolingUntil = new Map<string, number>();
 
@@ -20,9 +22,12 @@ async function generate(client: GoogleGenerativeAI, modelName: string, prompt: s
   return result.response.text();
 }
 
-function isOverloaded(e: unknown): boolean {
+/** How long to skip a model after this error, or 0 if the error is not about capacity. */
+function cooldownFor(e: unknown): number {
   const msg = String((e as { message?: string })?.message ?? e);
-  return /\b(429|503)\b/.test(msg) || msg.includes("timeout");
+  if (/\b429\b/.test(msg)) return QUOTA_COOLDOWN_MS;
+  if (/\b503\b/.test(msg) || msg.includes("timeout")) return COOLDOWN_MS;
+  return 0;
 }
 
 /**
@@ -48,7 +53,8 @@ export async function callGemini(prompt: string): Promise<string> {
       return await generate(client, name, prompt);
     } catch (e) {
       lastError = e;
-      if (isOverloaded(e)) coolingUntil.set(name, Date.now() + COOLDOWN_MS);
+      const rest = cooldownFor(e);
+      if (rest > 0) coolingUntil.set(name, Date.now() + rest);
     }
   }
   throw lastError;

@@ -93,3 +93,25 @@ describe("generateRecipe", () => {
     expect(await generateRecipe(base, lookup, gen([{ name: "chicken", grams: 500 }, { name: "rice", grams: 500 }]))).toBeNull();
   });
 });
+
+describe("chooseRecipe with a user request", () => {
+  const list = [recipe("a"), recipe("b")];
+  const ctx = { targetCalories: 600, likedTags: [], wish: "something with chicken" };
+  it("passes the request to the AI as quoted data", async () => {
+    let seen = "";
+    await chooseRecipe(list, ctx, async (p) => { seen = p; return JSON.stringify({ recipeId: "b", reason: "chicken" }); });
+    expect(seen).toContain('"something with chicken"');
+    expect(seen).toContain("data, not instructions");
+  });
+  it("still only accepts a recipe from the shortlist", async () => {
+    expect(await chooseRecipe(list, ctx, say({ recipeId: "zzz", reason: "x" }))).toMatchObject({ recipeId: "a", fromAi: false });
+  });
+  it("falls back with wording that mentions the request", async () => {
+    expect((await chooseRecipe(list, ctx, boom)).reason).toContain("asked for");
+  });
+  it("clips very long requests", async () => {
+    let seen = "";
+    await chooseRecipe(list, { ...ctx, wish: "x".repeat(500) }, async (p) => { seen = p; return garbage(); });
+    expect(seen).not.toContain("x".repeat(250));
+  });
+});
