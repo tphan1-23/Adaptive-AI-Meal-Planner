@@ -1,16 +1,19 @@
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import type { MealType, PlanningProfile, RecipeLite, TagAffinity } from "@/types";
-import { chooseRecipe } from "../ai/adapter";
+import { chooseRecipe, type Choice } from "../ai/adapter";
+import { takeAiBudget } from "../ai/rate-limit";
 import { getAffinity, recordSignal } from "../adherence/service";
 import { topTags } from "../adherence/affinity";
 import { HttpError } from "../auth/require-user";
 import { prisma } from "../db/prisma";
 import { normalizeAllergies } from "./allergens";
-import { filterRecipes } from "./filter";
+import { filterRecipes, ingredientsHaveAllergen } from "./filter";
 import { generatePlan, MEAL_SHARE } from "./generate-plan";
 import { MEAL_TAGS } from "./meal-types";
 import { rankRecipes } from "./rank";
+import { violatesDiet } from "./substitution";
+import { applyWish, ingredientsMentionAvoided, searchTerms, type ParsedWish, parseWish } from "./wish";
 import { addDays, isoOf, mondayOf, toDate, todayIso } from "./week";
 
 /** Columns the planner needs. No steps or ingredients, which keeps candidate loads light. */
@@ -26,6 +29,10 @@ const SHORTLIST_SIZE = 8;
 /** Calorie window around the meal target, widened step by step if too few recipes match. */
 const CALORIE_WINDOWS = [0.2, 0.4, 0.8];
 const MIN_POOL = 20;
+/** With a text request even a handful of matches is enough, so the calorie window stops widening sooner. */
+const MIN_WISH_POOL = 6;
+/** How many of the best-ranked recipes get their real ingredient lists checked for allergens and avoided words. */
+const INGREDIENT_CHECK_SIZE = 60;
 
 export interface UserPlanningContext extends PlanningProfile {
   equipment: string[];
@@ -62,16 +69,26 @@ export async function loadCandidates(
   profile: PlanningProfile,
   mealType: MealType,
   excludeIds: string[] = [],
+  wish: ParsedWish | null = null,
 ): Promise<RecipeLite[]> {
   const target = profile.calorieTarget * MEAL_SHARE[mealType];
   const allergies = normalizeAllergies(profile.allergies);
   const diet = profile.diet?.trim().toLowerCase();
+  // With a request, only recipes whose name or tags mention a wanted word are loaded, so
+  // "something Thai" is found even if no Thai recipe is among the closest in calories.
+  const wanted = wish && wish.want.length > 0 ? searchTerms(wish) : null;
+  const minPool = wanted ? MIN_WISH_POOL : MIN_POOL;
 
   let rows: RecipeLite[] = [];
   for (const w of CALORIE_WINDOWS) {
     rows = await prisma.recipe.findMany({
       where: {
-        OR: [{ ownerId: null }, { ownerId: userId }],
+        AND: [
+          { OR: [{ ownerId: null }, { ownerId: userId }] },
+          ...(wanted
+            ? [{ OR: [...wanted.stems.map((t) => ({ name: { contains: t, mode: "insensitive" as const } })), { tags: { hasSome: wanted.tags } }] }]
+            : []),
+        ],
         calories: { gte: target * (1 - w), lte: target * (1 + w) },
         tags: { hasSome: MEAL_TAGS[mealType] },
         ...(allergies.length ? { NOT: { allergens: { hasSome: allergies } } } : {}),
@@ -81,7 +98,7 @@ export async function loadCandidates(
       select: RECIPE_SELECT,
       take: 2000,
     });
-    if (rows.length >= MIN_POOL) break;
+    if (rows.length >= minPool) break;
   }
   return filterRecipes(rows, profile);
 }
@@ -156,7 +173,13 @@ export async function createWeekPlan(userId: string, date?: string, regenerate =
     recentRecipeIds(userId, weekStart),
     getTasteScores(userId, ctx.cuisines),
   ]);
-  const recipes = await loadCandidates(userId, ctx, "dinner", recent);
+  const candidates = await loadCandidates(userId, ctx, "dinner", recent);
+  // Rank first, then keep only recipes whose real ingredients are safe (see dropUnsafeByIngredients).
+  const recipes = await dropUnsafeByIngredients(
+    rankRecipes(candidates, { targetCalories: ctx.calorieTarget * MEAL_SHARE.dinner, affinity: taste }),
+    ctx,
+    null,
+  );
 
   const days = generatePlan({
     recipes,
@@ -187,14 +210,78 @@ export async function createWeekPlan(userId: string, date?: string, regenerate =
 
 // ---------- daily recommendation ----------
 
-async function shortlistFor(userId: string, ctx: UserPlanningContext, mealType: MealType, excludeIds: string[]) {
+async function shortlistFor(
+  userId: string,
+  ctx: UserPlanningContext,
+  mealType: MealType,
+  excludeIds: string[],
+  wish: ParsedWish | null = null,
+) {
   const [pool, taste] = await Promise.all([
-    loadCandidates(userId, ctx, mealType, excludeIds),
+    loadCandidates(userId, ctx, mealType, excludeIds, wish),
     getTasteScores(userId, ctx.cuisines),
   ]);
   const targetCalories = ctx.calorieTarget * MEAL_SHARE[mealType];
-  const shortlist = rankRecipes(pool, { targetCalories, affinity: taste }).slice(0, SHORTLIST_SIZE);
-  return { shortlist, targetCalories, taste };
+  let ranked = rankRecipes(pool, { targetCalories, affinity: taste });
+
+  if (wish) ranked = applyWish(ranked, wish);
+  ranked = await dropUnsafeByIngredients(ranked, ctx, wish);
+  return { shortlist: ranked.slice(0, SHORTLIST_SIZE), targetCalories, taste };
+}
+
+/**
+ * Second safety net on the best-ranked recipes, using their real ingredient lists. The recipe tags
+ * can be wrong (a tortellini recipe with no allergens listed, a "vegetarian" recipe with bacon), so
+ * a recipe is dropped when any ingredient name triggers one of the user's allergens, breaks their
+ * diet, or mentions a word they asked to avoid.
+ */
+async function dropUnsafeByIngredients(
+  ranked: RecipeLite[],
+  profile: { allergies: string[]; diet?: string | null },
+  wish: ParsedWish | null,
+): Promise<RecipeLite[]> {
+  const head = ranked.slice(0, INGREDIENT_CHECK_SIZE);
+  if (head.length === 0) return head;
+  const rows = await prisma.recipe.findMany({
+    where: { id: { in: head.map((r) => r.id) } },
+    select: { id: true, ingredients: true },
+  });
+  const bad = new Set(
+    rows
+      .filter((r) => {
+        const names = ingredientNames(r.ingredients);
+        return (
+          ingredientsHaveAllergen(names, profile.allergies) ||
+          names.some((n) => violatesDiet({ name: n, category: null }, profile.diet)) ||
+          (wish ? ingredientsMentionAvoided(names, wish) : false)
+        );
+      })
+      .map((r) => r.id),
+  );
+  return head.filter((r) => !bad.has(r.id));
+}
+
+function ingredientNames(json: unknown): string[] {
+  return Array.isArray(json) ? json.map((i) => String((i as { name?: unknown })?.name ?? "")) : [];
+}
+
+/**
+ * Asks the AI to choose from the shortlist. If the user is over their AI budget the
+ * top-ranked recipe is used instead, so swapping never fails because of Gemini limits.
+ */
+async function pickFrom(
+  userId: string,
+  shortlist: RecipeLite[],
+  ctx: { targetCalories: number; likedTags: string[]; wish?: string },
+): Promise<Choice> {
+  if (!takeAiBudget(userId)) {
+    return {
+      recipeId: shortlist[0].id,
+      reason: ctx.wish ? "Closest match to what you asked for." : "Best match for your calorie target and tastes.",
+      fromAi: false,
+    };
+  }
+  return chooseRecipe(shortlist, ctx);
 }
 
 /**
@@ -229,7 +316,7 @@ export async function recommendForDay(
   const { shortlist, targetCalories, taste } = await shortlistFor(userId, ctx, input.mealType, exclude);
   if (shortlist.length === 0) throw new HttpError(422, "No recipes match your diet and allergies");
 
-  const choice = await chooseRecipe(shortlist, { targetCalories, likedTags: topTags(taste).liked });
+  const choice = await pickFrom(userId, shortlist, { targetCalories, likedTags: topTags(taste).liked });
   const position = sameSlot.length === 0 ? 0 : Math.max(...sameSlot.map((e) => e.position)) + 1;
   const entry = await prisma.planEntry.create({
     data: {
@@ -247,8 +334,12 @@ export async function recommendForDay(
  * Replace the recipe on one of the user's plan entries with another from the same filtered
  * pool. Clears any cached conversion or modification, and records swap signals so future
  * ranking learns from it.
+ *
+ * With `request` ("something with chicken", "lighter, no onions") the shortlist is built from
+ * recipes that match those words, still inside the user's diet and allergy filters, and the AI
+ * picks the best of them. If nothing matches, a normal swap is done and `matchedRequest` is false.
  */
-export async function swapEntry(userId: string, entryId: string) {
+export async function swapEntry(userId: string, entryId: string, request?: string) {
   const entry = await prisma.planEntry.findFirst({ where: { id: entryId, userId } });
   if (!entry) throw new HttpError(404, "Plan entry not found");
 
@@ -257,10 +348,25 @@ export async function swapEntry(userId: string, entryId: string) {
   const exclude = [...new Set([...weekEntries.map((e) => e.recipeId), ...(await recentRecipeIds(userId, isoOf(entry.date)))])];
   const mealType = entry.mealType as MealType;
 
-  const { shortlist, targetCalories, taste } = await shortlistFor(userId, ctx, mealType, exclude);
+  const parsed = request ? parseWish(request) : null;
+  const wish = parsed && (parsed.want.length > 0 || parsed.avoid.length > 0) ? parsed : null;
+
+  let found = await shortlistFor(userId, ctx, mealType, exclude, wish);
+  const matchedRequest = wish ? found.shortlist.length > 0 : null;
+  if (wish && !matchedRequest) {
+    // Nothing matched what they wanted. Still honour what they asked to avoid.
+    const avoidOnly = wish.avoid.length > 0 ? { ...wish, want: [] } : null;
+    found = await shortlistFor(userId, ctx, mealType, exclude, avoidOnly);
+    if (found.shortlist.length === 0) found = await shortlistFor(userId, ctx, mealType, exclude);
+  }
+  const { shortlist, targetCalories, taste } = found;
   if (shortlist.length === 0) throw new HttpError(422, "No other recipes match your diet and allergies");
 
-  const choice = await chooseRecipe(shortlist, { targetCalories, likedTags: topTags(taste).liked });
+  const choice = await pickFrom(userId, shortlist, {
+    targetCalories,
+    likedTags: topTags(taste).liked,
+    wish: matchedRequest ? wish!.text : undefined,
+  });
   const updated = await prisma.planEntry.update({
     where: { id: entry.id },
     data: {
@@ -273,7 +379,11 @@ export async function swapEntry(userId: string, entryId: string) {
   });
   await recordSignal(userId, entry.recipeId, "swap_out");
   await recordSignal(userId, choice.recipeId, "swap_in");
-  return { entry: formatEntry(updated), reason: choice.reason, fromAi: choice.fromAi };
+  const reason =
+    matchedRequest === false
+      ? `Nothing matched "${wish!.text}" within your diet and allergies, so here is a close alternative${wish!.avoid.length > 0 ? ` without ${wish!.avoid.join(" or ")}` : ""}.`
+      : choice.reason;
+  return { entry: formatEntry(updated), reason, fromAi: choice.fromAi, matchedRequest };
 }
 
 // ---------- recipe detail ----------

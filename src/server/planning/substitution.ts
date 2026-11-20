@@ -1,4 +1,4 @@
-import { detectAllergens, normalizeAllergies } from "./allergens";
+import { detectAllergens, hasPhrase, normalizeAllergies } from "./allergens";
 import { ingredientsHaveAllergen } from "./filter";
 
 /** One USDA ingredient, nutrition per 100 g. */
@@ -28,13 +28,21 @@ const MEAT_WORDS = [
   "beef", "pork", "chicken", "turkey", "lamb", "veal", "bacon", "ham", "sausage", "duck", "goose",
   "venison", "bison", "rabbit", "liver", "gizzard", "giblet", "steak", "meat", "mutton", "goat",
   "salami", "pepperoni", "hot dog", "frankfurter", "lard", "tallow", "gelatin", "broth", "bouillon", "animal fat",
+  "meatball", "meatloaf", "base", "stock",
 ];
 
+/** Contain a meat word but are not meat. */
+const NOT_MEAT = ["goat cheese", "goat milk", "goat s milk", "chicken of the woods", "stock cube vegetable"];
+
 const norm = (s: string) => s.trim().toLowerCase();
-const hasWord = (name: string, words: string[]) => {
-  const n = norm(name);
-  return words.some((w) => n.includes(w));
-};
+
+/** Words that say a "meat" name is actually meat-free ("vegetable broth", "vegetarian chicken strips"). */
+const MEATLESS_MARKERS = [
+  "vegetable", "veggie", "vegan", "vegetarian", "meatless", "faux", "imitation", "mock", "plant based", "plant-based",
+  "tofu", "seitan", "tempeh", "soy", "substitute", "alternative", "analog", "analogue",
+];
+/** Whole-word match, so "ham" is not in "champagne" and "liver" is not in "slivered". */
+const hasWord = (name: string, words: string[]) => words.some((w) => hasPhrase(name, w));
 
 /** True when a diet forbids this ingredient. Fish and shellfish are caught by the allergen keywords. */
 export function violatesDiet(c: Pick<SubstituteCandidate, "name" | "category">, diet: string | null | undefined): boolean {
@@ -45,7 +53,8 @@ export function violatesDiet(c: Pick<SubstituteCandidate, "name" | "category">, 
   // category is a safer test than guessing names. Eggs are the one thing vegetarians still eat.
   // Whole-word match so "duck egg" is an egg but "eggplant" is not ("duck" must not make it meat).
   const isEgg = /\beggs?\b/.test(norm(c.name));
-  const animal = isEgg
+  const meatless = hasWord(c.name, MEATLESS_MARKERS) || hasWord(c.name, NOT_MEAT);
+  const animal = isEgg || meatless
     ? false
     : c.category === "protein" ||
       hasWord(c.name, MEAT_WORDS) ||

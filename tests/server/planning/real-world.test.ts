@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allergyKeywords, normalizeAllergies } from "@/server/planning/allergens";
+import { ingredientHasAllergen, normalizeAllergies } from "@/server/planning/allergens";
 import { filterRecipes, ingredientsHaveAllergen } from "@/server/planning/filter";
 import { generatePlan } from "@/server/planning/generate-plan";
 import { fitsMeal } from "@/server/planning/meal-types";
@@ -31,8 +31,32 @@ describe("allergy names", () => {
     expect(ingredientsHaveAllergen(["Sea bass fillet", "squid rings"], ["fish"])).toBe(true);
     expect(ingredientsHaveAllergen(["squid"], ["shellfish"])).toBe(true);
   });
-  it("includes the canonical label itself as a keyword", () => {
-    expect(allergyKeywords(["shrimp"])).toContain("shellfish");
+  it("matches whole words, so look-alikes are not flagged", () => {
+    expect(ingredientHasAllergen("lemon peel", "fish")).toBe(false); // not "eel"
+    expect(ingredientHasAllergen("veggie crumbles", "egg")).toBe(false);
+    expect(ingredientHasAllergen("eggplants", "egg")).toBe(false);
+    expect(ingredientHasAllergen("crunchy peanut butter", "dairy")).toBe(false);
+    expect(ingredientHasAllergen("coconut cream", "dairy")).toBe(false);
+    expect(ingredientHasAllergen("thai rice noodles", "gluten")).toBe(false);
+    expect(ingredientHasAllergen("sweet rice flour", "gluten")).toBe(false);
+    expect(ingredientHasAllergen("gluten-free pasta", "gluten")).toBe(false);
+  });
+  it("still catches the real thing, plural or compound", () => {
+    expect(ingredientHasAllergen("peanut butter", "peanut")).toBe(true);
+    expect(ingredientHasAllergen("farm fresh eggs", "egg")).toBe(true);
+    expect(ingredientHasAllergen("pollock fillets", "fish")).toBe(true);
+    expect(ingredientHasAllergen("crabmeat", "shellfish")).toBe(true);
+    expect(ingredientHasAllergen("soymilk", "soy")).toBe(true);
+    expect(ingredientHasAllergen("fontina", "dairy")).toBe(true);
+    expect(ingredientHasAllergen("whole wheat spaghetti", "gluten")).toBe(true);
+    expect(ingredientHasAllergen("butter", "dairy")).toBe(true);
+  });
+  it("treats pasta shapes as gluten", () => {
+    for (const n of ["tortellini", "cheese ravioli", "gnocchi", "penne rigate"]) expect(ingredientHasAllergen(n, "gluten")).toBe(true);
+  });
+  it("matches an unknown allergy as a whole word", () => {
+    expect(ingredientsHaveAllergen(["kiwi slices"], ["Kiwi"])).toBe(true);
+    expect(ingredientsHaveAllergen(["kiwifruit"], ["kiwi"])).toBe(false);
   });
 });
 

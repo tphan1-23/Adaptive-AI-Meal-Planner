@@ -13,15 +13,13 @@ import { describeSubstitute, findSubstitutes } from "../planning/substitution";
 import { mondayOf, toDate } from "../planning/week";
 import { convertSteps, generateRecipe, modifyRecipe, phraseSubstitution } from "./adapter";
 import { getIngredientIndex, getNutritionLookup } from "./lookup";
-import { allowRequest } from "./rate-limit";
+import { takeAiBudget } from "./rate-limit";
 
-/** Each user may make this many AI calls a minute (the free Gemini tier is shared by everyone). */
-const AI_CALLS_PER_MINUTE = 6;
 /** Cap on AI-generated recipes stored per user per day. */
 const GENERATED_PER_DAY = 10;
 
 function limitAi(userId: string) {
-  if (!allowRequest(`ai:${userId}`, AI_CALLS_PER_MINUTE)) {
+  if (!takeAiBudget(userId)) {
     throw new HttpError(429, "Too many AI requests. Please wait a minute.");
   }
 }
@@ -233,7 +231,7 @@ export async function suggestSubstitutes(userId: string, entryId: string, ingred
   const found = findSubstitutes(target, common, { allergies: ctx.allergies, diet: ctx.diet, limit: 3 }, originalGrams);
 
   const substitutes = found.map((s) => ({ ...s, note: describeSubstitute(target, s, originalGrams) }));
-  if (substitutes[0]?.quality === "close" && allowRequest(`ai:${userId}`, AI_CALLS_PER_MINUTE)) {
+  if (substitutes[0]?.quality === "close" && takeAiBudget(userId)) {
     const phrased = await Promise.race([
       phraseSubstitution({
         recipeName: entry.recipe.name,

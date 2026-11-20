@@ -118,3 +118,27 @@ describe("describeSubstitute", () => {
     expect(text).toContain("more protein");
   });
 });
+
+describe("violatesDiet on whole ingredient names", () => {
+  const veg = (name: string) => violatesDiet({ name, category: null }, "vegetarian");
+  it("flags meat and fish by name", () => {
+    for (const n of ["bacon", "chicken strips", "beef broth", "lamb chops", "fillets of sole", "pollock fillets"]) {
+      expect(veg(n)).toBe(true);
+    }
+  });
+  it("does not flag meat-free look-alikes", () => {
+    for (const n of ["vegetable broth", "vegetarian chicken strips", "veggie burger", "faux beef", "tofu", "mushroom", "cauliflower"]) {
+      expect(veg(n)).toBe(false);
+    }
+  });
+  it("flags dairy and eggs for vegans only", () => {
+    expect(violatesDiet({ name: "parmesan cheese", category: null }, "vegan")).toBe(true);
+    expect(violatesDiet({ name: "parmesan cheese", category: null }, "vegetarian")).toBe(false);
+    expect(violatesDiet({ name: "vegan butter", category: null }, "vegan")).toBe(false);
+    expect(violatesDiet({ name: "unsalted butter", category: null }, "vegan")).toBe(true);
+    expect(violatesDiet({ name: "soy yogurt", category: null }, "vegan")).toBe(false);
+    expect(violatesDiet({ name: "champagne", category: null }, "vegetarian")).toBe(false); // not "ham"
+    expect(violatesDiet({ name: "slivered almonds", category: null }, "vegan")).toBe(false); // not "liver"
+    expect(violatesDiet({ name: "goat cheese", category: null }, "vegetarian")).toBe(false);
+  });
+});

@@ -139,9 +139,39 @@ Note: Food.com ingredients have **no real quantities** (`quantity: 1, unit: "ite
 ## Swap, convert, modify, generate
 
 ### `POST /api/swap`
-`{ "entryId": "…" }` replaces that meal with another that fits the user. Clears any conversion or modification and
-teaches the preference model. Returns `{ "entry": { … }, "reason": "…", "fromAi": true }`.
+`{ "entryId": "…", "request": "something with chicken" }` replaces that meal with another that fits the user. Clears
+any conversion or modification and teaches the preference model.
+
+`request` is optional plain text up to 200 characters, such as `"something with chicken"`, `"Thai noodles"` or
+`"lighter, no onions"`. Words after "no", "without" or "avoid" are things to leave out. The new recipe is chosen from
+recipes that match the request, always inside the user's diet and allergies, so asking for "chicken" as a vegetarian
+never returns real meat. Matching is on recipe names and tags, so vague words like "light" match nothing.
+
+```json
+{ "entry": { /* entry */ }, "reason": "It features tofu and has the calorie count closest to the target.",
+  "fromAi": true, "matchedRequest": true }
+```
+`matchedRequest` is `true` when something matched the request, `false` when nothing did (a normal swap was done and
+`reason` says nothing matched, and any "no X" words are still honoured), and `null` when no request was sent.
+`fromAi` is `false` when the AI was unavailable or over its limit and the best match was used instead.
 `404` unknown entry, `422` no other recipe fits.
+
+### `POST /api/substitute`
+`{ "entryId": "…", "ingredient": "butter" }` suggests up to 3 swaps for one ingredient of that meal's recipe
+(`ingredient` must be one of the recipe's ingredient names, exactly as shown).
+```json
+{ "ingredient": "lemon", "matchedAs": "lemon", "amountAssumed": true, "originalGrams": 100,
+  "substitutes": [ { "name": "lime", "category": "fruit", "quality": "close", "grams": 97, "distance": 0.04,
+                     "per100g": { "calories": 30, "proteinG": 0.7, "carbsG": 10.5, "fatG": 0.2 },
+                     "note": "You can easily swap the lemon for 97 grams of lime, which has about the same calories." } ] }
+```
+The swaps are found by matching calories and macros in the same food category, never contain the user's allergens and
+respect their diet. `quality` is `close` or `rough`: show rough swaps as a weaker suggestion. `grams` keeps the
+calories the same. `note` is a ready-to-show sentence (worded by the AI for the best close swap when available).
+`amountAssumed` is `true` when the recipe gives no gram amount, so 100 g was used. `matchedAs` is the ingredient
+we matched the recipe's wording to; it can be a generic word, so consider showing it. `substitutes` can be empty
+(no close swap, for example butter). `404` if the ingredient is not in the recipe, `422` if we have no nutrition data
+for it.
 
 ### `POST /api/convert`
 `{ "entryId": "…" }` adapts the steps to the user's kitchen equipment (needs equipment in the profile, else `400`).
