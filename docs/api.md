@@ -215,6 +215,71 @@ planned meals use it. `404` if the user has no plan.
 
 ---
 
+## Meal logs and adherence
+
+Where the user says what they actually ate. This feeds the dashboard's planned-versus-actual charts.
+
+### `POST /api/meal-logs`
+Record a meal. `status` decides what else is needed:
+
+| `status` | Needs | Calories stored |
+| --- | --- | --- |
+| `eaten_as_planned` | `entryId` | the planned meal's (the modified recipe's calories if the user changed it) |
+| `skipped` | `entryId` | 0 |
+| `modified` | `entryId`, `calories` | what the user sends |
+| `ad_hoc` (not in the plan) | `calories`; `date` and `mealType` default to today and dinner; no `entryId` | what the user sends |
+
+Optional on any: `proteinG`, `carbsG`, `fatG`, `note` (up to 300 characters). `calories` is 0-5000. For a planned meal the
+date and meal type come from the plan entry. A meal cannot be logged for a day after tomorrow.
+```json
+{ "entryId": "…", "status": "modified", "calories": 950, "note": "added extra rice" }
+```
+Returns `201`:
+```json
+{ "log": { "id": "…", "date": "2026-11-18", "mealType": "dinner", "status": "modified", "entryId": "…",
+           "recipe": { "id": "…", "name": "Pho Bo" }, "calories": 950, "proteinG": null, "carbsG": null,
+           "fatG": null, "note": "added extra rice", "createdAt": "…" } }
+```
+Logging the same planned meal again **updates** the earlier log (one log per planned meal). Marking a meal `skipped`
+also teaches the preference model (a `skip` signal), once, not on every save. `400` invalid input or a future date,
+`404` if the entry is not the user's.
+
+### `GET /api/meal-logs?from=YYYY-MM-DD&to=YYYY-MM-DD`
+The user's logs, newest first, in the same shape as above. Defaults to the last 28 days, at most 120 days.
+`{ "from": "…", "to": "…", "logs": [ { … } ] }`
+
+### `DELETE /api/meal-logs`
+`{ "id": "…" }` removes a log (undo). `{ "ok": true }`, or `404` if it is not the user's.
+
+### `GET /api/adherence?from=YYYY-MM-DD&to=YYYY-MM-DD`
+Planned versus actual, shaped for charts. Same range rules as above, and the end is never later than today (planned
+meals in the future would look like missed meals).
+```json
+{ "from": "2026-10-24", "to": "2026-11-20",
+  "totals": { /* summary, see below */ },
+  "days":  [ { "date": "2026-11-18", "plannedMeals": 1, "plannedCalories": 899, "actualCalories": 950,
+               "loggedPlannedMeals": 1, "eatenAsPlanned": 0, "modified": 1, "skipped": 0, "adHoc": 0, "loggedDays": 1,
+               "plannedCaloriesOnLoggedDays": 899 } ],
+  "weeks": [ { "weekStart": "2026-11-16", /* summary fields */ "avgWeightKg": 79.5, "weightChangeKg": -0.5 } ],
+  "adherenceVsWeight": { "r": null, "weeks": 1, "note": "Not enough data yet: …" } }
+```
+A **summary** (in `totals` and every week) has the counts above plus:
+- `loggedShare`: planned meals that were logged, 0 to 1 (`null` if nothing was planned)
+- `followedRate`: of the planned meals that were logged, the share eaten exactly as planned, 0 to 1 (`null` if none logged)
+- `calorieDifferencePerDay`: average actual minus planned calories over days that have a log (positive = ate more).
+  Days with no log are left out, so they do not look like undereating.
+
+A day or week with nothing logged has zeros and `null` rates, never `NaN`. Skipped meals count as 0 calories.
+`weeks` are Monday-start calendar weeks; `avgWeightKg` is the average of that week's weigh-ins and `weightChangeKg` the
+change from the previous week's average (`null` if either week has no weigh-in).
+`adherenceVsWeight.r` (-1 to 1) relates how closely the plan was followed to the weekly weight change. It stays `null`
+until 3 weeks have both numbers; show the `note` instead. It shows a pattern, not a cause.
+
+Suggested charts: planned vs actual calories per day (bars), `followedRate` per week (line), and `avgWeightKg` per
+week next to it.
+
+---
+
 ## Preference learning
 
 ### `POST /api/signals`
@@ -238,7 +303,8 @@ Returns `201 { "updatedTags": { "italian": 0.1, "pasta": 0.1 } }`. `404` if the 
 
 **Weekly check-in:** `POST /api/logs` with the new weight, then re-read `GET /api/profile` for the updated target.
 
+**Logging a day:** `GET /api/plan`, then `POST /api/meal-logs` for each meal (eaten, skipped or changed), plus `ad_hoc` for anything off plan. The dashboard reads `GET /api/adherence`.
+
 ## Not built yet
 
-- Logging what was actually eaten (meal logs) and the planned-versus-actual dashboard data.
 - Real ingredient quantities for dataset recipes.
