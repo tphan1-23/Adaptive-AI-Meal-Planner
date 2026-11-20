@@ -84,12 +84,18 @@ email-confirmation settings are switched on.
   `POST /api/swap { entryId, request? }`. If `matchedRequest` is `false`, show the `reason` ("Nothing matched...").
 - **Add another recipe today:** `POST /api/recommendation { date, extra: true }`.
 - **Generate a new recipe for me:** `POST /api/generate { wish?, date }`. It can answer `422`; offer "Try again".
+- **Log it:** buttons on each meal, `POST /api/meal-logs { entryId, status }` with `status` `eaten_as_planned`, `skipped`,
+  or `modified` (also send `calories`, so ask roughly how much they ate). Logging the same meal again updates the earlier
+  log, so the buttons can simply be changed later. "I ate something else" is `{ status: "ad_hoc", calories, mealType }`.
+  The log response says what was stored; undo with `DELETE /api/meal-logs { id }`.
 - Tapping the recipe opens `/recipes/<entry id>`.
 
 ### /plan
 - `GET /api/plan?date=...` and draw the 7 days (a day can have more than one entry when `position` is above 0).
 - "Plan a new week": `POST /api/plan { regenerate: true }` (ask for confirmation, it replaces the week).
 - Per-day swap as on `/today`. Week navigation is the `date` query parameter.
+- To show which meals were already logged (a tick or a strike-through), read `GET /api/meal-logs?from=<monday>&to=<sunday>`
+  and match each log's `entryId` to a plan entry.
 
 ### /recipes/[id]  (use the **plan entry id**, not the recipe id)
 - `GET /api/entries/:id` returns the recipe plus the user's own changes. Show:
@@ -114,7 +120,11 @@ email-confirmation settings are switched on.
 - Weight: `GET /api/logs` for the history and `POST /api/logs { weightKg }` for a new weigh-in. The answer can include an
   `adjustment` (the calorie target changed): tell the user why, using its `reason`.
 - Current target: `GET /api/profile`.
-- **Planned versus actual meals is not built yet.** Leave a placeholder for that chart until the meal-log routes exist.
+- **Planned versus actual:** `GET /api/adherence` returns everything for the charts (see "Meal logs and adherence" in
+  [api.md](api.md)). Suggested charts: planned vs actual calories per day (bars from `days`), `followedRate` per week
+  (line from `weeks`) with `avgWeightKg` beside it. Show `totals.followedRate` as "You followed your plan X% of the time"
+  when it is not `null`. `adherenceVsWeight.r` is `null` until there are 3 weeks of data: show its `note` instead of a number.
+- Days with nothing logged return zeros and `null` rates, never `NaN`, so charts can draw them as empty.
 
 ## Mistakes to avoid
 
@@ -123,3 +133,4 @@ email-confirmation settings are switched on.
 - Do not cache the plan forever. After a swap, modify or regenerate, read it again.
 - Do not store the user's allergies or diet in the browser. Read them from `/api/profile`.
 - Add any new private page to `PROTECTED_PAGES` in `src/server/auth/routes.ts`.
+- Meals can only be logged up to tomorrow (`400` otherwise), so do not offer a log button on days far in the future.
