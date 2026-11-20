@@ -16,10 +16,10 @@ export const profileInput = z.object({
   activityLevel: z.enum(["sedentary", "light", "moderate", "active", "very_active"]),
   goal: z.enum(["lose", "maintain", "gain"]),
   goalRateKg: z.number().min(0).max(1).nullable().optional(),
-  cuisines: z.array(z.enum(CUISINES)).default([]),
+  cuisines: z.array(z.enum(CUISINES)).max(CUISINES.length).default([]),
   diet: z.enum(DIETS).nullable().optional(),
-  allergies: z.array(z.enum(ALLERGENS)).default([]),
-  equipment: z.array(z.enum(EQUIPMENT)).default([]),
+  allergies: z.array(z.enum(ALLERGENS)).max(ALLERGENS.length).default([]),
+  equipment: z.array(z.enum(EQUIPMENT)).max(EQUIPMENT.length).default([]),
 });
 export type ProfileInput = z.infer<typeof profileInput>;
 

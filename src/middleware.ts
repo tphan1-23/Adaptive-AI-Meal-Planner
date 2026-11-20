@@ -1,17 +1,34 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { dropMalformedAuthCookies } from "@/server/auth/cookies";
+import { checkApiRequest } from "@/server/auth/request-guard";
 import { isProtectedPath, loginRedirect } from "@/server/auth/routes";
 
 /**
- * Runs before every page:
+ * Runs before every page and API request.
+ *
+ * API requests (`/api/*`): only the cheap header checks in `checkApiRequest` (cross-site changes
+ * and oversized bodies are refused). The login itself is verified by each route with `withUser`,
+ * which answers 401 instead of redirecting.
+ *
+ * Pages:
  * 1. refreshes the Supabase login when its token has expired and passes the new cookies on, so
  *    server components always see a valid session;
  * 2. sends logged-out visitors from protected pages to the login page.
- * API routes are skipped (see `config.matcher`): they verify the login themselves with
- * `withUser` and answer 401 instead of redirecting.
  */
 export async function middleware(request: NextRequest) {
+  if (request.nextUrl.pathname.startsWith("/api/")) {
+    const blocked = checkApiRequest({
+      method: request.method,
+      contentLength: request.headers.get("content-length"),
+      transferEncoding: request.headers.get("transfer-encoding"),
+      origin: request.headers.get("origin"),
+      secFetchSite: request.headers.get("sec-fetch-site"),
+      host: request.nextUrl.host,
+    });
+    return blocked ? NextResponse.json({ error: blocked.error }, { status: blocked.status }) : NextResponse.next();
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -46,6 +63,9 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except API routes, Next internals and static files.
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
+  // API routes (header checks only), and every page except Next internals and static files.
+  matcher: [
+    "/api/:path*",
+    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+  ],
 };
