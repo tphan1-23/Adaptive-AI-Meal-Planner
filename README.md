@@ -23,6 +23,7 @@ Gemini free tier (server-side only), hosted on Vercel.
 
 - [docs/architecture.md](docs/architecture.md): how the system fits together
 - [docs/api.md](docs/api.md): every API endpoint with request and response shapes
+- [docs/frontend-guide.md](docs/frontend-guide.md): which page calls which endpoint, and the rules to follow
 
 ## Getting started
 
