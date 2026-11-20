@@ -1,0 +1,125 @@
+# Frontend guide
+
+How to connect each page to the backend. The backend is finished and tested, so every page below can be built
+against real data today. Request and response shapes are in [api.md](api.md); this page says **which page calls
+what**, and the rules that are easy to get wrong.
+
+## Ground rules
+
+- The browser only calls our `/api/*` routes. The one exception is **sign-in and sign-out**, which use the Supabase
+  browser client. Never call Gemini or read database tables from the browser.
+- Every API call needs a logged-in session cookie. The middleware already redirects logged-out visitors from the
+  private pages to `/login?next=...`, and API calls answer `401` when logged out.
+- **AI calls are slow** (5 to 25 seconds): `/api/swap`, `/api/recommendation`, `/api/convert`, `/api/modify`,
+  `/api/generate` and `/api/substitute`. Show a spinner, disable the button while it runs, and do not use a client
+  timeout shorter than 30 seconds.
+- Dataset recipes have **no real ingredient quantities** (`1 item`). Show ingredient names only; do not show "1 item".
+- Use the allowed values in [api.md](api.md#allowed-values-use-these-exact-strings-in-forms) for every form field
+  (allergies, diet, equipment, cuisines). The backend rejects anything else.
+
+## Status codes every page should handle
+
+| Code | What to do |
+| --- | --- |
+| 401 | Go to `/login?next=<current path>` |
+| 409 | The user has not finished onboarding: go to `/onboarding` |
+| 400 | Show the form errors from `issues` |
+| 404 | "Not found" (also what another user's id returns) |
+| 422 | Show the message and let the user retry (nothing matched, or the AI result was rejected) |
+| 429 | "Please wait a minute" (AI limit reached) |
+
+A small helper makes this one place (put it in `src/lib/api.ts`):
+
+```ts
+export class ApiError extends Error {
+  constructor(public status: number, message: string) { super(message); }
+}
+
+export async function api<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
+  const res = await fetch(path, {
+    method: init?.method ?? (init?.body ? "POST" : "GET"),
+    headers: { "Content-Type": "application/json" },
+    body: init?.body ? JSON.stringify(init.body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && typeof window !== "undefined") {
+    window.location.href = `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+  }
+  if (!res.ok) throw new ApiError(res.status, data.error ?? "Something went wrong");
+  return data as T;
+}
+```
+
+## Sign-in (src/lib/supabase-browser.ts)
+
+```ts
+import { createBrowserClient } from "@supabase/ssr";
+
+export const supabaseBrowser = () =>
+  createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+```
+
+Sign in with `supabaseBrowser().auth.signInWithPassword({ email, password })` and sign up with `auth.signUp(...)`.
+Sign out with `auth.signOut()` and then go to `/login`. Check in the Supabase dashboard which sign-in methods and
+email-confirmation settings are switched on.
+
+## Page by page
+
+### /login
+1. Sign in or sign up with the Supabase browser client.
+2. Then `GET /api/profile`. If `profile` is `null`, go to `/onboarding`. Otherwise go to
+   `safeNextPath(next)` (import it from `@/server/auth/routes`; it blocks redirects to other sites and defaults to
+   `/today`). Never redirect to a raw `next` value.
+
+### /onboarding
+- One form (or a short multi-step quiz) with the fields in `PUT /api/profile`. Use the allowed-value lists for
+  cuisines, diet, allergies and equipment. Allergies and diet are safety settings: explain that on the form.
+- `PUT /api/profile` returns the profile with the computed `calorieTarget`. Show it ("Your daily target is 2209 kcal").
+- Then `POST /api/plan` to create the first week, and go to `/today`.
+
+### /today
+- `GET /api/plan`. A `404` means no plan yet: call `POST /api/plan` and show it.
+- Find today's entry (`entries` have a `date`). Show the recipe name, calories and macros.
+- **Swap:** button plus an optional text box ("something with chicken", "lighter, no onions"):
+  `POST /api/swap { entryId, request? }`. If `matchedRequest` is `false`, show the `reason` ("Nothing matched...").
+- **Add another recipe today:** `POST /api/recommendation { date, extra: true }`.
+- **Generate a new recipe for me:** `POST /api/generate { wish?, date }`. It can answer `422`; offer "Try again".
+- Tapping the recipe opens `/recipes/<entry id>`.
+
+### /plan
+- `GET /api/plan?date=...` and draw the 7 days (a day can have more than one entry when `position` is above 0).
+- "Plan a new week": `POST /api/plan { regenerate: true }` (ask for confirmation, it replaces the week).
+- Per-day swap as on `/today`. Week navigation is the `date` query parameter.
+
+### /recipes/[id]  (use the **plan entry id**, not the recipe id)
+- `GET /api/entries/:id` returns the recipe plus the user's own changes. Show:
+  - `modifiedRecipe` instead of the recipe's ingredients and steps when it is not `null`;
+  - `convertedSteps` instead of the steps when the list is not empty.
+- **Convert for my equipment:** `POST /api/convert { entryId }`. When `available` is `false`, show the `note`
+  and keep the original steps.
+- **Change this recipe:** a text box, `POST /api/modify { entryId, request }`, and an "undo" button,
+  `DELETE /api/modify { entryId }`. A `422` means the change could not be made safely: ask for different wording.
+- **Swap an ingredient:** a button next to each ingredient, `POST /api/substitute { entryId, ingredient }`. Show up to
+  3 swaps with their `note`. `quality: "rough"` means a weaker match, so label it. An empty list means "no close swap".
+- **Save / like:** `POST /api/signals { recipeId, type: "favorite" }` (the recipe id is in the `recipe` object).
+  Skipping or rating a meal uses the same route.
+- Show allergens and diet tags from `recipe.allergens` and `recipe.diets`.
+
+### /shopping-list
+- `GET /api/shopping-list` (add `?weekStart=` for another week). `404` means no plan yet.
+- Tick an item: `PATCH /api/shopping-list { itemId, checked }`. Update the UI immediately and undo it if the call fails.
+- Quantities for dataset recipes are placeholders: show the name, and `mealCount` ("used in 3 meals") instead.
+
+### /dashboard
+- Weight: `GET /api/logs` for the history and `POST /api/logs { weightKg }` for a new weigh-in. The answer can include an
+  `adjustment` (the calorie target changed): tell the user why, using its `reason`.
+- Current target: `GET /api/profile`.
+- **Planned versus actual meals is not built yet.** Leave a placeholder for that chart until the meal-log routes exist.
+
+## Mistakes to avoid
+
+- Do not hide the `reason` from a swap or recommendation. It is a short sentence about why the recipe fits.
+- Do not assume the AI worked: `fromAi: false` just means the app used its backup choice. The result is still valid.
+- Do not cache the plan forever. After a swap, modify or regenerate, read it again.
+- Do not store the user's allergies or diet in the browser. Read them from `/api/profile`.
+- Add any new private page to `PROTECTED_PAGES` in `src/server/auth/routes.ts`.
