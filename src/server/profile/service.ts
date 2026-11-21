@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "../db/prisma";
 import { ALLERGENS, CUISINES, DIETS, EQUIPMENT } from "../db/vocab";
 import { dailyTarget, type ActivityLevel, type Goal, type Sex } from "./calories";
+import { targetInputsUnchanged } from "./target";
 import { adjustTarget, type AdjustResult } from "./weigh-in";
 
 /** A weigh-in only triggers a target adjustment if the previous one was at least this many days ago. */
@@ -31,7 +32,8 @@ export async function getProfile(userId: string) {
 
 /** Create or update the user's profile and (re)compute their starting calorie target. */
 export async function saveProfile(userId: string, input: ProfileInput) {
-  const calorieTarget = dailyTarget(
+  const existing = await prisma.profile.findUnique({ where: { id: userId } });
+  const computed = dailyTarget(
     {
       weightKg: input.weightKg,
       heightCm: input.heightCm,
@@ -42,6 +44,10 @@ export async function saveProfile(userId: string, input: ProfileInput) {
     input.goal,
     input.goalRateKg,
   );
+  // Changing only diet, allergies, equipment or cuisines keeps the current target, including any
+  // adjustments from weekly weigh-ins. A change to body, activity, goal or pace recomputes it.
+  const keep = existing?.calorieTarget != null && targetInputsUnchanged(existing, { ...input, goalRateKg: input.goalRateKg ?? null });
+  const calorieTarget = keep ? existing!.calorieTarget! : computed;
   const data = { ...input, goalRateKg: input.goalRateKg ?? null, diet: input.diet ?? null, calorieTarget };
   const profile = await prisma.profile.upsert({
     where: { id: userId },

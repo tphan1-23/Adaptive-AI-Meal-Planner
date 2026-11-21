@@ -132,19 +132,25 @@ export function Chip({
 /** Back arrow + red step bars at the top of onboarding. */
 export function StepBar({ step, total, onBack }: { step: number; total: number; onBack?: () => void }) {
   return (
-    <div className="mb-6 flex items-center gap-3">
-      <button
-        type="button"
-        onClick={onBack}
-        aria-label="Back"
-        className={cx("-ml-1 px-1 text-3xl leading-none", !onBack && "invisible")}
-      >
-        ‹
-      </button>
-      <div className="flex flex-1 gap-2">
+    <div className="mb-4">
+      {/* The bar spans the full width; the back arrow sits below it so an empty arrow slot never pushes the bar in. */}
+      <div role="progressbar" aria-label={`Step ${step} of ${total}`} aria-valuemin={1} aria-valuemax={total} aria-valuenow={step} className="flex gap-1.5">
         {Array.from({ length: total }).map((_, i) => (
-          <div key={i} className={cx("h-[3px] flex-1 rounded", i < step ? "bg-brand" : "bg-line")} />
+          <div key={i} className={cx("h-1.5 flex-1 rounded-full", i < step ? "bg-brand" : "bg-line")} />
         ))}
+      </div>
+      <div className="mt-1 flex h-12 items-center justify-between">
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="Back"
+          className={cx("-ml-1 px-1 text-3xl leading-none", !onBack && "invisible")}
+        >
+          ‹
+        </button>
+        <span className="text-[13px] text-ink-muted">
+          Step {step} of {total}
+        </span>
       </div>
     </div>
   );

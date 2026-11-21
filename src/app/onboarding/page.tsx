@@ -118,6 +118,10 @@ const closestPace = (rate: number | null): Pace =>
 
 export default function OnboardingPage() {
   const [step, setStep] = useState(1);
+  // Each step starts at the top instead of keeping the previous step's scroll position.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [step]);
   const [f, setF] = useState<Form>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<null | "profile" | "plan">(null);

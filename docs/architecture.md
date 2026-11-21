@@ -13,6 +13,8 @@ The Adaptive AI Meal Planner is a responsive web app that recommends a recipe ea
 | Component | Responsibility |
 | --- | --- |
 | Web app | Next.js / React UI on Vercel: onboarding, daily recipe, recipe detail, shopping list, adherence dashboard. Calls only our API. |
+| Phone app | Expo (React Native) app in `mobile/`: login, onboarding quiz, today (swap, log meals and other food, weigh-in), recipe (equipment conversion, ingredient swap), saved recipes, shopping, progress, settings (profile, password, account deletion). Calls only our API, signing in with the Supabase client and sending its access token as a bearer token. |
+| Dish photos | Recipes are matched to a well-known dish by name and get a free Wikimedia Commons photo. Addresses are stored in the repo (`src/server/recipes/dish-photos.json`); no outside request at runtime. |
 | Backend API + Auth | Next.js API routes. Validates input, verifies the user on every request, returns only that user's data. The single security checkpoint. |
 | Profile and calorie engine | Daily target from height, weight, age, sex, activity (Mifflin-St Jeor). Nudged by a small step after weekly weigh-ins, never below a safety floor. |
 | Recommendation and substitution | Hard filters (allergies, diet), ranking by calorie fit and affinity, ingredient swaps by nearest-neighbor search on nutrition data, shopping list. |

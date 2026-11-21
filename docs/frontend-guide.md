@@ -126,6 +126,34 @@ email-confirmation settings are switched on.
   when it is not `null`. `adherenceVsWeight.r` is `null` until there are 3 weeks of data: show its `note` instead of a number.
 - Days with nothing logged return zeros and `null` rates, never `NaN`, so charts can draw them as empty.
 
+### Swap sheet (on /today)
+- Open it with `POST /api/swap/options { entryId, request? }` (fast, no AI): up to 3 choices with a photo, calories and a one-line note.
+  Show them, and a text box that calls the same route again with `request` to refresh the list.
+- When the user taps one, `POST /api/swap { entryId, recipeId }`. A `422` means it is no longer available: refresh the list.
+
+### Eaten today (on /today)
+- `GET /api/meal-logs?from=<day>&to=<day>` for the selected day. Add up `calories` (skipped counts 0) and show it against `calorieTarget`.
+- "Log other food": `POST /api/meal-logs { status: "ad_hoc", calories, mealType, date, note }`. Remove with `DELETE /api/meal-logs { id }`.
+- Weigh-in: keep an input available at any time (`POST /api/logs { weightKg }`), and highlight it when the last weigh-in is 6 or more days old.
+
+### Photos
+- Use `recipe.imageUrl` when it is not `null`; otherwise draw an illustration. If the image fails to load, fall back to the illustration too.
+- Credit Wikimedia Commons somewhere visible (settings or about).
+
+### Saved recipes
+- The heart calls `POST /api/favorites { recipeId }` / `DELETE /api/favorites { recipeId }`; start it filled when `recipe.isFavorite` is true.
+- The saved list is `GET /api/favorites`; open one with `GET /api/recipes/:id` (it is a recipe, not a plan entry).
+
+### Cooking with other equipment (on the recipe page)
+- Show the appliance choices (the allowed equipment values) at all times, not only when the recipe lists equipment the user lacks.
+  `POST /api/convert { entryId, equipment: [...] }`; `convertedForEquipment` says what the shown steps were written for.
+  A "not convertible" answer comes back with `available: false`, the original steps and a `note`: show the note.
+
+### Settings
+- Edit answers by sending the whole body to `PUT /api/profile`. The calorie target changes only if body, goal or pace changed.
+- Change password in the client with `supabase.auth.updateUser({ password })` after checking the current password with `signInWithPassword`.
+- Delete account: `DELETE /api/account { confirm: "DELETE", password }`, then sign out locally.
+
 ## Mistakes to avoid
 
 - Do not hide the `reason` from a swap or recommendation. It is a short sentence about why the recipe fits.

@@ -5,8 +5,11 @@ never to Gemini or the database directly.
 
 ## Conventions
 
-- **Auth:** every endpoint requires a logged-in Supabase session (cookie). Without one the response is
-  `401 { "error": "Unauthorized" }`. A user only ever sees and changes their own data.
+- **Auth:** every endpoint requires a logged-in Supabase session. Two ways to send it: the session **cookie** (web), or
+  an `Authorization: Bearer <access token>` header (the Expo phone app, which has no cookies). The token is the
+  Supabase access token from `supabase.auth.getSession()`; the server checks it with Supabase on every request, so a
+  forged or expired token is `401`. Without a valid login the response is `401 { "error": "Unauthorized" }`. A user only
+  ever sees and changes their own data.
 - **Errors:** always `{ "error": "message" }`. Validation failures also include `issues` (the zod issue list).
 - **Dates:** `YYYY-MM-DD`. A "week" starts on Monday.
 - **Bodies:** JSON, with `Content-Type: application/json`.
@@ -61,6 +64,10 @@ Limits: `heightCm` 100-250, `weightKg` 30-300, `age` 13-100, `goalRateKg` 0-1 (k
 `cuisines`, `allergies`, `equipment` default to `[]`; `diet` and `goalRateKg` may be `null` or omitted.
 Returns `{ "profile": { … } }` (same shape as GET). `400` on invalid input.
 
+**Editing later (settings screen):** send the whole body again with the changed parts. The calorie target is recomputed only
+when height, weight, age, sex, activity level, goal or pace changed. Changing only diet, allergies, equipment or cuisines
+keeps the current target, including any adjustments from weekly weigh-ins. (Send the profile's current `weightKg`, which weigh-ins keep up to date.)
+
 ---
 
 ## Weigh-ins
@@ -90,9 +97,12 @@ An **entry** is one meal in a plan:
 ```json
 { "id": "…", "date": "2026-11-16", "mealType": "dinner", "position": 0,
   "recipe": { "id": "…", "name": "Pho Bo", "calories": 480, "proteinG": 28, "carbsG": 52, "fatG": 14,
-              "tags": ["vietnamese", "asian"], "equipment": ["stovetop"] },
+              "tags": ["vietnamese", "asian"], "equipment": ["stovetop"],
+              "imageUrl": "https://upload.wikimedia.org/…/500px-Pho.jpg" },
   "converted": false, "modified": false }
 ```
+`imageUrl` is a photo of the dish, or `null` when no photo matches (show an illustration instead). See
+[Dish photos](#dish-photos).
 
 ### `GET /api/plan?date=YYYY-MM-DD`
 The plan for the week containing `date` (default: this week).
@@ -131,21 +141,67 @@ Use this for the recipe page. One of the user's plan entries with the full recip
 { "entry": { /* entry */ },
   "recipe": { "id": "…", "name": "…", "source": "dataset", "calories": 480, "proteinG": 28, "carbsG": 52, "fatG": 14,
               "ingredients": [ { "name": "garlic", "quantity": 1, "unit": "item" } ],
-              "steps": ["…"], "tags": ["…"], "equipment": ["…"], "allergens": ["…"], "diets": ["…"] },
+              "steps": ["…"], "tags": ["…"], "equipment": ["…"], "allergens": ["…"], "diets": ["…"],
+              "imageUrl": "https://…" , "isFavorite": false },
   "convertedSteps": [], "convertedForEquipment": [], "modifiedRecipe": null }
 ```
 Note: Food.com ingredients have **no real quantities** (`quantity: 1, unit: "item"`). Show names only for dataset recipes.
+`isFavorite` says whether the user saved the recipe (see [Favorites](#favorites)). `convertedForEquipment` lists the
+appliances the converted steps were written for.
 
 ### `GET /api/recipes/:id`
-`{ "recipe": { … } }` (same recipe shape). Shared recipes and the user's own AI recipes only, otherwise `404`.
+`{ "recipe": { … } }` (same recipe shape, with `imageUrl` and `isFavorite`). Shared recipes and the user's own AI recipes only, otherwise `404`.
+Use it for a saved recipe that is not a plan entry.
+
+### Dish photos
+The Food.com dataset has no photos. A recipe is matched to a well-known dish by its name (about 76% of dinner recipes
+match one of 68 dishes) and gets a free photo of that dish from Wikipedia / Wikimedia Commons, each under its own free
+license, so apps should show a credit (the phone app does, under Settings, About). The photo addresses are stored in
+`src/server/recipes/dish-photos.json` and built by `npm run build:dish-photos`, so serving a recipe makes no outside
+request. The photo shows the dish, not necessarily this exact recipe.
+
+---
+
+## Favorites
+
+Saved recipes. Saving also records a `favorite` taste signal, once per recipe.
+
+### `GET /api/favorites`
+```json
+{ "favorites": [ { "id": "…", "name": "Spinach Feta Penne With Pine Nuts", "calories": 824, "proteinG": 27, "carbsG": 88, "fatG": 46,
+                   "tags": ["greek"], "imageUrl": "https://…", "savedAt": "2026-11-21T08:00:00.000Z" } ] }
+```
+Newest first. `id` is the recipe id (open it with `GET /api/recipes/:id`).
+
+### `POST /api/favorites`
+`{ "recipeId": "…" }` saves a recipe. `201 { "saved": true, "created": true }`, or `200` with `"created": false` if it was
+already saved. `404` for a recipe the user may not see.
+
+### `DELETE /api/favorites`
+`{ "recipeId": "…" }` removes it. `{ "saved": false }` (also when it was not saved).
 
 ---
 
 ## Swap, convert, modify, generate
 
+### `POST /api/swap/options`
+`{ "entryId": "…", "request": "no beans" }` (`request` optional) returns up to 3 safe, ranked replacements for that
+meal, for the swap sheet. **Read-only**: nothing is changed and the AI is not called (fast, and it does not use the
+AI budget). Every option already passed the diet, allergy and ingredient checks.
+```json
+{ "options": [ { "recipeId": "…", "name": "Lentil and spinach curry", "calories": 610, "proteinG": 28, "tags": ["indian"],
+                 "note": "On target for this meal · matches indian dishes you like" } ],
+  "matchedRequest": true, "note": null }
+```
+`note` is set (and `matchedRequest` is `false`) when nothing matched the request and close alternatives are shown.
+`404` unknown entry, `422` nothing fits. Send the chosen `recipeId` to `POST /api/swap`.
+
 ### `POST /api/swap`
-`{ "entryId": "…", "request": "something with chicken" }` replaces that meal with another that fits the user. Clears
+`{ "entryId": "…", "request": "something with chicken", "recipeId": "…" }` replaces that meal with another that fits the user. Clears
 any conversion or modification and teaches the preference model.
+
+`recipeId` (optional) is a choice from `/api/swap/options`. That exact recipe is used, with no AI call, but only if it is
+still in the user's safe pool; otherwise `422`. Without it, the AI (or the top-ranked recipe) chooses.
 
 `request` is optional plain text up to 200 characters, such as `"something with chicken"`, `"Thai noodles"` or
 `"lighter, no onions"`. Words after "no", "without" or "avoid" are things to leave out. The new recipe is chosen from
@@ -179,9 +235,12 @@ we matched the recipe's wording to; it can be a generic word, so consider showin
 for it.
 
 ### `POST /api/convert`
-`{ "entryId": "…" }` adapts the steps to the user's kitchen equipment (needs equipment in the profile, else `400`).
+`{ "entryId": "…", "equipment": ["air-fryer"] }` adapts the steps to the appliances the user wants to cook with.
+`equipment` is optional (one or more of the allowed equipment values); without it the user's saved kitchen is used, and
+that needs equipment in the profile (else `400`). This lets the user choose "cook this in the air fryer" even when the
+recipe itself tags no equipment.
 ```json
-{ "available": true, "steps": ["…"], "note": "", "cached": false }
+{ "available": true, "steps": ["…"], "note": "", "cached": false, "equipment": ["air-fryer"] }
 ```
 When the AI is down or fails, `available` is `false` and `steps` are the **original** steps with a `note` to show the
 user. A successful conversion is saved on the entry, so asking again returns `cached: true` at no cost.
@@ -309,6 +368,22 @@ Returns `201 { "updatedTags": { "italian": 0.1, "pasta": 0.1 } }`. `404` if the 
 **Weekly check-in:** `POST /api/logs` with the new weight, then re-read `GET /api/profile` for the updated target.
 
 **Logging a day:** `GET /api/plan`, then `POST /api/meal-logs` for each meal (eaten, skipped or changed), plus `ad_hoc` for anything off plan. The dashboard reads `GET /api/adherence`.
+
+**Other food (not in the plan):** `POST /api/meal-logs { "status": "ad_hoc", "calories": 320, "mealType": "snack", "date": "2026-11-21", "note": "Greek yogurt with honey" }`.
+`note` (up to 300 characters) says what it was. Read the day back with `GET /api/meal-logs?from=<day>&to=<day>`; the sum of
+`calories` (skipped meals count 0) against the target gives "eaten so far".
+
+**Saved recipes:** `POST /api/favorites` when the heart is tapped, `GET /api/favorites` for the list, `GET /api/recipes/:id` to open one.
+
+---
+
+## Account
+
+### `DELETE /api/account`
+`{ "confirm": "DELETE", "password": "…" }` permanently deletes the signed-in user's data (profile, plans, weigh-ins, logs,
+signals, favorites, shopping items, private recipes) and then their login. The current password is required, so a stolen
+access token alone cannot delete an account: `403` for a wrong password, `400` without `confirm: "DELETE"`. There is no
+undo. Changing the password is done in the app with the Supabase client (`auth.updateUser`), not through this API.
 
 ## Not built yet
 

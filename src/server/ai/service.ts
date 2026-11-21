@@ -62,13 +62,15 @@ function toLite(r: Awaited<ReturnType<typeof loadEntry>>["recipe"]): RecipeLite 
 // ---------- equipment conversion ----------
 
 /** Convert a plan entry's steps for the user's equipment. The result is cached on the entry. */
-export async function convertEntry(userId: string, entryId: string) {
+export async function convertEntry(userId: string, entryId: string, chosenEquipment?: string[]) {
   const entry = await loadEntry(userId, entryId);
   const ctx = await getPlanningContext(userId);
-  if (ctx.equipment.length === 0) throw new HttpError(400, "Add your kitchen equipment to your profile first");
+  // The user can pick the appliance(s) to cook with for this meal; otherwise their saved kitchen is used.
+  const equipment = chosenEquipment && chosenEquipment.length > 0 ? [...new Set(chosenEquipment)] : ctx.equipment;
+  if (equipment.length === 0) throw new HttpError(400, "Add your kitchen equipment to your profile first");
 
-  if (entry.convertedSteps.length > 0 && sameSet(entry.convertedForEquipment, ctx.equipment)) {
-    return { available: true, steps: entry.convertedSteps, note: "", cached: true };
+  if (entry.convertedSteps.length > 0 && sameSet(entry.convertedForEquipment, equipment)) {
+    return { available: true, steps: entry.convertedSteps, note: "", cached: true, equipment };
   }
 
   limitAi(userId);
@@ -79,14 +81,14 @@ export async function convertEntry(userId: string, entryId: string) {
     lite.ingredients = parseIngredients(modified.ingredients);
   }
 
-  const out = await convertSteps(lite, ctx.equipment);
+  const out = await convertSteps(lite, equipment);
   if (out.available) {
     await prisma.planEntry.update({
       where: { id: entry.id },
-      data: { convertedSteps: out.steps, convertedForEquipment: ctx.equipment },
+      data: { convertedSteps: out.steps, convertedForEquipment: equipment },
     });
   }
-  return { ...out, cached: false };
+  return { ...out, cached: false, equipment };
 }
 
 // ---------- recipe modification ----------

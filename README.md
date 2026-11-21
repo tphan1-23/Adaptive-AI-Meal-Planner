@@ -42,6 +42,22 @@ run migrations. Run `npx prisma migrate dev` only after changing `prisma/schema.
 
 Each person uses their own `GEMINI_API_KEY` (free at aistudio.google.com).
 
+### Phone app (Expo)
+
+`mobile/` is an Expo (React Native) app that uses the same API. See [mobile/README.md](mobile/README.md). To try it on a
+phone on the same Wi-Fi: run `npm run dev:lan` here, then `npx expo start` in `mobile/`.
+
+### Checks
+
+```bash
+npm run typecheck && npm run lint && npm test && npm run build
+npm run test:api-e2e     # live API test with a real login (needs the API running and the keys in .env)
+npm run test:e2e         # backend services against the real database
+npm run build:dish-photos # only when the dish rules in src/server/recipes/dish-photos.ts change
+```
+
+The two end-to-end tests create a throwaway user and delete it afterwards.
+
 ## Rules
 
 - Never commit `.env` or any keys.
@@ -54,7 +70,8 @@ Each person uses their own `GEMINI_API_KEY` (free at aistudio.google.com).
 ```
 src/app/        pages + API routes
 src/components/ shared UI
-src/server/     backend logic (profile, planning, ai, shopping-list, adherence, auth, db)
+src/server/     backend logic (profile, planning, ai, shopping-list, adherence, favorites, account, recipes, auth, db)
+mobile/         Expo phone app (login, quiz, Today, recipe, saved, shopping, progress, settings)
 prisma/         schema + migrations
 scripts/        one-time dataset imports
 tests/          mirrors src/server

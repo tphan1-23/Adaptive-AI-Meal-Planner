@@ -1,5 +1,6 @@
-import Placeholder from "@/components/Placeholder";
+import { redirect } from "next/navigation";
 
-export default function Page() {
-  return <Placeholder title="Weekly plan" />;
+// The design has no separate weekly-plan screen: the week strip on Today is the plan view.
+export default function PlanPage() {
+  redirect("/today");
 }
