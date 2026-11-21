@@ -17,7 +17,8 @@ function Gate() {
     );
   }
   // Logged out: only the login screen is reachable. Logged in: skip the login screen.
-  if (!session && first !== "login") return <Redirect href="/login" />;
+  // The reset-password screen is open to both: the emailed link starts a session there.
+  if (!session && first !== "login" && first !== "reset-password") return <Redirect href="/login" />;
   if (session && first === "login") return <Redirect href="/today" />;
 
   return (

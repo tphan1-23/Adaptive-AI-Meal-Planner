@@ -63,7 +63,7 @@ and a hosted API URL (`EXPO_PUBLIC_API_URL`) exist. The bundle ids are in `app.j
 - **Shopping** is cleaned in code (`garlic clove` and `garlic` become one item), grouped by aisle or by recipe, with pantry basics set aside.
 - **How was it?** after eating a meal feeds the taste model (see "How the planner learns" in `docs/api.md`); Progress shows what you like and what you don't.
 - **Create a recipe** (AI) from Today, **change this recipe** in words from the recipe screen, and **Use on a day** for saved recipes.
-- `EXPO_PUBLIC_WEB_URL` (optional) makes the forgot-password email land on the web app's set-new-password page.
+- **Forgot password** opens the app itself on its own set-new-password screen (`src/app/reset-password.tsx`). In Supabase → Authentication → URL Configuration, add the app link as a redirect URL: `exp://**` while testing in Expo Go, and `mealplanner://reset-password` for a built app.
 
 ## Not built yet
 

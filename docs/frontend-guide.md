@@ -172,8 +172,9 @@ email-confirmation settings are switched on.
   fit the user's allergies or diet, so say so.
 
 ### Forgot password
-- `supabase.auth.resetPasswordForEmail(email, { redirectTo: "<web address>/reset-password" })`. That address must be an allowed redirect URL in the
-  Supabase dashboard. The `/reset-password` page (public) lets the user pick a new password with `auth.updateUser`.
+- Web: `supabase.auth.resetPasswordForEmail(email, { redirectTo: "<web address>/reset-password" })`. The public `/reset-password` page lets the user pick a new password with `auth.updateUser`.
+- Phone: `redirectTo` is `Linking.createURL("reset-password")`; the link opens the app on `reset-password.tsx`, which starts the recovery session from the link and calls `auth.updateUser`.
+- Every redirect address must be allowed in the Supabase dashboard (Authentication → URL Configuration).
 
 ### Settings
 - Edit answers by sending the whole body to `PUT /api/profile`. The calorie target changes only if body, goal or pace changed.

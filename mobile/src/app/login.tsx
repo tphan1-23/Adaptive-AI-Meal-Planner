@@ -1,3 +1,4 @@
+import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import { useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
@@ -64,10 +65,9 @@ export default function Login() {
     setError(null);
     setInfo(null);
     if (!isEmail(email)) return setError("Type your email above first.");
-    // The reset email links to the web app's set-new-password page when its address is configured
-    // (EXPO_PUBLIC_WEB_URL, which must also be an allowed redirect URL in Supabase).
-    const web = (process.env.EXPO_PUBLIC_WEB_URL ?? "").replace(/\/$/, "");
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), web ? { redirectTo: `${web}/reset-password` } : undefined);
+    // The email link opens this app's own set-new-password screen. That address (it differs between Expo Go
+    // and a built app) must be an allowed redirect URL in Supabase.
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: Linking.createURL("reset-password") });
     if (error) setError(error.message);
     else setInfo(`If ${email.trim()} has an account, a reset link is on its way.`);
   }
