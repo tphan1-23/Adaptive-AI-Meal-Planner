@@ -269,7 +269,9 @@ async function dropUnsafeByIngredients(
  * allergies or diet (for example by redoing onboarding), meals that no longer fit must not stay.
  * Each remaining meal from today on that breaks the current rules is replaced with the best safe
  * recipe (no AI involved); if only the user's AI modification is the problem it is undone; if
- * nothing safe exists the meal is removed. Past days are history and are left alone.
+ * nothing safe exists the meal is removed. A meal on a day that has already passed is only
+ * left alone if the user logged eating it (that is a record of what happened); an unlogged past
+ * meal is just a stale placeholder that would still show banned foods and feed the shopping list.
  * Returns how many meals were changed.
  */
 export async function repairUnsafeEntries(userId: string, planId: string, ctx: UserPlanningContext): Promise<number> {
@@ -278,11 +280,14 @@ export async function repairUnsafeEntries(userId: string, planId: string, ctx: U
     select: {
       id: true, date: true, mealType: true, recipeId: true, modifiedRecipe: true,
       recipe: { select: { allergens: true, diets: true, ingredients: true } },
+      _count: { select: { mealLogs: true } },
     },
   });
   const today = todayIso();
   const broken = entries.filter(
-    (e) => isoOf(e.date) >= today && (!recipeFits(e.recipe, ctx) || !modificationFits(e.modifiedRecipe, ctx)),
+    (e) =>
+      (isoOf(e.date) >= today || e._count.mealLogs === 0) &&
+      (!recipeFits(e.recipe, ctx) || !modificationFits(e.modifiedRecipe, ctx)),
   );
   if (broken.length === 0) return 0;
 
