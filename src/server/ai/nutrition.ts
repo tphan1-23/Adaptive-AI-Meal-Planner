@@ -84,6 +84,15 @@ const ALIASES: Record<string, string> = {
   chickpea: "chickpea garbanzo bean",
   garbanzo: "chickpea garbanzo bean",
   flour: "all-purpose flour",
+  polenta: "cornmeal",
+  "corn meal": "cornmeal",
+  jalapeno: "pepper",
+  serrano: "pepper",
+  salsa: "tomato sauce",
+  "marinara sauce": "tomato sauce",
+  marinara: "tomato sauce",
+  "pasta sauce": "tomato sauce",
+  "spaghetti sauce": "tomato sauce",
   "fresh ginger": "ginger root", // plain "ginger" is the dried spice in the USDA table
 };
 

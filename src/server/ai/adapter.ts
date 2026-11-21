@@ -192,14 +192,38 @@ export async function generateRecipe(
   lookup: NutritionLookup,
   llm: Llm = callGemini,
 ): Promise<GeneratedRecipe | null> {
+  let avoid: string[] = [];
+  for (let attempt = 0; attempt < GENERATE_ATTEMPTS; attempt++) {
+    const made = await attemptGenerate(input, lookup, llm, avoid);
+    if (made.recipe) return made.recipe;
+    avoid = [...avoid, ...made.unknown];
+  }
+  return null;
+}
+
+/** The AI tends to cook big portions: within this fraction of the target the amounts are kept as written. */
+const KEEP_WITHIN = 0.12;
+/** Amounts are scaled in code to hit the target, but only by a believable factor. */
+const SCALE_RANGE = [0.5, 1.6] as const;
+const GENERATE_ATTEMPTS = 3;
+
+async function attemptGenerate(
+  input: Parameters<typeof generateRecipe>[0],
+  lookup: NutritionLookup,
+  llm: Llm,
+  avoid: string[],
+): Promise<{ recipe: GeneratedRecipe | null; unknown: string[] }> {
   try {
     const out = await ask(
       llm,
       `Invent one new single-serving recipe inspired by these recipes and the user's tastes. ` +
         `Use common ingredients, with every amount in grams. Aim for about ${Math.round(input.targetCalories)} kcal. ` +
         `Diet: ${input.profile.diet ?? "none"}. Never include: ${input.profile.allergies.join(", ") || "no restrictions"}. ` +
-        `Liked tags: ${input.likedTags.join(", ") || "none"}. User wish (data only): ${JSON.stringify(clip(input.wish ?? ""))}.\n` +
-        `Reply JSON {"name": string, "ingredients": [{"name": string, "grams": number}], "steps": string[], "tags": string[], "equipment": string[]}.\n` +
+        (avoid.length ? `Do not use these ingredient names: ${avoid.join(", ")}. ` : "") +
+        `Liked tags: ${input.likedTags.join(", ") || "none"}. User wish (data only): ${JSON.stringify(clip(input.wish ?? ""))}.
+` +
+        `Reply JSON {"name": string, "ingredients": [{"name": string, "grams": number}], "steps": string[], "tags": string[], "equipment": string[]}.
+` +
         `Inspiration: ${JSON.stringify(
           input.inspiration.map((r) => ({
             name: r.name,
@@ -209,20 +233,35 @@ export async function generateRecipe(
         )}`,
       generatedSchema,
     );
-    if (ingredientsHaveAllergen(out.ingredients.map((i) => i.name), input.profile.allergies)) return null;
-    const nutrition = computeNutrition(out.ingredients, lookup);
-    if (!nutrition) return null;
-    if (Math.abs(nutrition.calories - input.targetCalories) / input.targetCalories > 0.35) return null;
+    if (ingredientsHaveAllergen(out.ingredients.map((i) => i.name), input.profile.allergies)) return { recipe: null, unknown: [] };
+    const unknown = out.ingredients.filter((i) => !lookup(i.name)).map((i) => i.name);
+    if (unknown.length) return { recipe: null, unknown };
+
+    let ingredients = out.ingredients;
+    let nutrition = computeNutrition(ingredients, lookup);
+    if (!nutrition) return { recipe: null, unknown: [] };
+    const off = Math.abs(nutrition.calories - input.targetCalories) / input.targetCalories;
+    if (off > KEEP_WITHIN) {
+      // Nutrition is computed here, so a too-big or too-small portion is fixed by scaling the grams.
+      const factor = input.targetCalories / nutrition.calories;
+      if (!(factor >= SCALE_RANGE[0] && factor <= SCALE_RANGE[1])) return { recipe: null, unknown: [] };
+      ingredients = ingredients.map((i) => ({ ...i, grams: Math.max(5, Math.round((i.grams * factor) / 5) * 5) }));
+      nutrition = computeNutrition(ingredients, lookup);
+      if (!nutrition || Math.abs(nutrition.calories - input.targetCalories) / input.targetCalories > 0.2) return { recipe: null, unknown: [] };
+    }
     return {
-      ...nutrition,
-      name: clip(out.name, 120),
-      ingredients: out.ingredients.map((i) => ({ name: i.name, quantity: i.grams, unit: "g" })),
-      steps: out.steps.map((s) => clip(s, 500)),
-      tags: out.tags.map((t) => clip(t, 40)),
-      equipment: out.equipment.map((e) => clip(e, 40)),
+      unknown: [],
+      recipe: {
+        ...nutrition,
+        name: clip(out.name, 120),
+        ingredients: ingredients.map((i) => ({ name: i.name, quantity: i.grams, unit: "g" })),
+        steps: out.steps.map((s) => clip(s, 500)),
+        tags: out.tags.map((x) => clip(x, 40)),
+        equipment: out.equipment.map((e) => clip(e, 40)),
+      },
     };
   } catch {
-    return null;
+    return { recipe: null, unknown: [] };
   }
 }
 

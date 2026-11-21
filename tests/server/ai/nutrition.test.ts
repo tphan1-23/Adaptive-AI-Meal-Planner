@@ -75,6 +75,14 @@ describe("fallbacks beyond word dropping", () => {
   it("reads plain flour as all-purpose flour", () => {
     expect(buildNutritionLookup([row("all-purpose flour", 364), row("peanut flour", 428), row("carob flour", 222)])("flour")?.calories).toBe(364);
   });
+  it("reads polenta, jalapeno and salsa as the food they are made of", () => {
+    const m = buildNutritionLookup([row("cornmeal", 362), row("pepper", 27), row("tomato sauce", 24)]);
+    expect(m("polenta")?.calories).toBe(362);
+    expect(m("jalapeno pepper")?.calories).toBe(27);
+    expect(m("jalapeno")?.calories).toBe(27);
+    expect(m("salsa")?.calories).toBe(24);
+    expect(m("marinara sauce")?.calories).toBe(24);
+  });
   it("does not guess when the matches disagree", () => {
     expect(l("cheese")).toBeUndefined();
   });

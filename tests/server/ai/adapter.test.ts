@@ -89,6 +89,25 @@ describe("generateRecipe", () => {
     const out = await generateRecipe({ ...base, profile: { allergies: ["rice"], diet: null } }, lookup, gen([{ name: "chicken", grams: 150 }, { name: "rice", grams: 150 }]));
     expect(out).toBeNull();
   });
+  it("scales a too-big portion to the target instead of failing", async () => {
+    const out = await generateRecipe(base, lookup, gen([{ name: "chicken", grams: 250 }, { name: "rice", grams: 250 }]));
+    expect(out).not.toBeNull();
+    expect(Math.abs(out!.calories - 500) / 500).toBeLessThan(0.12);
+    expect(out!.ingredients[0].quantity).toBeLessThan(250);
+  });
+  it("retries once, asking the AI to avoid names it could not match", async () => {
+    const seen: string[] = [];
+    const answers = [
+      [{ name: "unobtainium", grams: 100 }, { name: "rice", grams: 100 }],
+      [{ name: "chicken", grams: 150 }, { name: "rice", grams: 150 }],
+    ];
+    const llm = async (p: string) => {
+      seen.push(p);
+      return JSON.stringify({ name: "New dish", ingredients: answers[seen.length - 1], steps: ["mix"], tags: [], equipment: [] });
+    };
+    expect(await generateRecipe(base, lookup, llm)).not.toBeNull();
+    expect(seen[1]).toContain("unobtainium");
+  });
   it("rejects calories far from the target", async () => {
     expect(await generateRecipe(base, lookup, gen([{ name: "chicken", grams: 500 }, { name: "rice", grams: 500 }]))).toBeNull();
   });
