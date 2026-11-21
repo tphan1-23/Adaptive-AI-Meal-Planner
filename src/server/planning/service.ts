@@ -510,9 +510,50 @@ export async function swapEntry(userId: string, entryId: string, request?: strin
     },
     include: entryInclude,
   });
+  // The user is replacing this meal because they did not eat it, so a log saying they ate (or changed or skipped)
+  // the old recipe no longer describes this entry. Remove it.
+  const cleared = await prisma.mealLog.deleteMany({ where: { userId, planEntryId: entry.id } });
   await recordSignal(userId, entry.recipeId, "swap_out");
   await recordSignal(userId, choice.recipeId, "swap_in");
-  return { entry: formatEntry(updated), reason: !recipeId && note ? note : choice.reason, fromAi: choice.fromAi, matchedRequest };
+  return { entry: formatEntry(updated), reason: !recipeId && note ? note : choice.reason, fromAi: choice.fromAi, matchedRequest, clearedLog: cleared.count > 0 };
+}
+
+/** Days a recipe may be added to: a little in the past (to catch up) up to two months ahead. */
+const ADD_PAST_DAYS = 14;
+const ADD_FUTURE_DAYS = 60;
+
+/**
+ * Add one specific recipe to a day as another meal. Nothing is replaced: the day's other meals (and anything the user
+ * logged for them) stay as they are. The recipe must pass the same allergy, diet and ingredient checks as a swap.
+ */
+export async function addRecipeToDay(userId: string, input: { date: string; mealType: MealType; recipeId: string }) {
+  const today = todayIso();
+  if (input.date < addDays(today, -ADD_PAST_DAYS) || input.date > addDays(today, ADD_FUTURE_DAYS)) {
+    throw new HttpError(400, "Pick a day within the last two weeks or the next two months");
+  }
+  const ctx = await getPlanningContext(userId);
+  const picked = await safeVisibleRecipe(userId, input.recipeId, ctx);
+  if (!picked) throw new HttpError(422, "That recipe is not available for you. Pick another.");
+
+  const weekStart = toDate(mondayOf(input.date));
+  const plan = await prisma.weeklyPlan.upsert({
+    where: { userId_weekStart: { userId, weekStart } },
+    create: { userId, weekStart, calorieTarget: ctx.calorieTarget },
+    update: {},
+  });
+  const taken = await prisma.planEntry.findMany({
+    where: { planId: plan.id, date: toDate(input.date), mealType: input.mealType },
+    select: { position: true },
+  });
+  const entry = await prisma.planEntry.create({
+    data: {
+      userId, planId: plan.id, recipeId: picked.id, date: toDate(input.date), mealType: input.mealType,
+      position: taken.length ? Math.max(...taken.map((t) => t.position)) + 1 : 0,
+    },
+    include: entryInclude,
+  });
+  await recordSignal(userId, picked.id, "swap_in");
+  return { entry: formatEntry(entry) };
 }
 
 // ---------- recipe detail ----------

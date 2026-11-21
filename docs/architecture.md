@@ -106,6 +106,7 @@ All routes need a logged-in user (401 otherwise) and only ever touch that user's
 | `POST /api/meal-logs` | `{ entryId?, status, calories?, proteinG?, carbsG?, fatG?, note?, date?, mealType? }` | `{ log }`: what was actually eaten (`eaten_as_planned`, `modified`, `skipped`, `ad_hoc`). Logging a planned meal again updates it; skipping teaches the preference model. `GET` (with `from`/`to`) lists logs, `DELETE { id }` undoes one |
 | `GET /api/adherence` | `from?`, `to?` | `{ totals, days, weeks, adherenceVsWeight }`: planned versus actual for the dashboard charts, per day and per week, with the weekly average weight and how closely following the plan relates to weight change |
 | `GET /api/entries/:id` | | `{ entry, recipe, convertedSteps, convertedForEquipment, modifiedRecipe }`: everything the recipe page needs |
+| `POST /api/plan/entries` | `{ date, mealType?, recipeId }` | `{ entry }`: adds a recipe to a day as another meal, never replacing; refused if not safe for the user |
 | `GET /api/recipes` | `q?`, `mealType?`, `minCalories?`, `maxCalories?`, `sort?`, `saved?`, `offset?`, `limit?` | `{ recipes, total, hasMore, nextOffset }`: every recipe that is safe for the user, one page at a time |
 | `GET /api/recipes/:id` | | `{ recipe }` with ingredients, steps and macros |
 

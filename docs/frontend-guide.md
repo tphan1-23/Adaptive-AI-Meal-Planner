@@ -145,8 +145,12 @@ email-confirmation settings are switched on.
   pause in typing), meal chips (`mealType`), sort chips (`sort`), and "Show more" (`offset` = how many are already shown). Ignore answers from an older search.
 - The list only has safe recipes, so there is nothing to warn about; if a search finds nothing, say that allergens are never listed.
 - Tapping a row opens the recipe (`GET /api/recipes/:id`, route `/recipes/saved/<id>` on the phone, `/saved/<id>` on the web) with two actions:
-  **Use on a day** (pick a day, `POST /api/swap { entryId, recipeId }`, `422` = does not fit allergies or diet) and **I ate this**
-  (`POST /api/meal-logs { status: "ad_hoc", recipeId, date, mealType }`, then the "How was it?" step).
+  **Use on a day** and **I ate this**.
+  - *Use on a day* is two steps: pick a day, then either **Add as another meal** (`POST /api/plan/entries { date, mealType, recipeId }`, never replaces anything) or
+    **Replace** one of that day's meals (`POST /api/swap { entryId, recipeId }`). Replacing removes the "ate it" log on the replaced meal, so say so when that
+    meal is logged (`GET /api/meal-logs`). `422` = does not fit allergies or diet.
+  - *I ate this* (`POST /api/meal-logs { status: "ad_hoc", recipeId, date, mealType }`, then the "How was it?" step) adds the food as an extra eaten item and
+    never touches the plan or the day's other logs.
 
 ### Saved recipes
 - The heart calls `POST /api/favorites { recipeId }` / `DELETE /api/favorites { recipeId }`; start it filled when `recipe.isFavorite` is true.

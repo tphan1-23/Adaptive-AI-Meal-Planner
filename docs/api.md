@@ -134,6 +134,12 @@ built in code and falls back to the top-ranked recipe if it is unavailable.
 
 ---
 
+### `POST /api/plan/entries`
+`{ "date": "2026-11-24", "mealType": "dinner", "recipeId": "…" }` adds that recipe to the day **as another meal**. Nothing is replaced: the
+day's other meals, and anything the user logged for them, stay as they are. `mealType` defaults to `dinner`. The recipe must pass the same
+allergy, diet and real-ingredient checks as a swap (`422` otherwise). `date` must be within the last 14 days or the next 60 (`400`).
+Returns `201 { "entry": { … } }`. Use `POST /api/swap` instead to replace a meal.
+
 ## Recipe detail
 
 ### `GET /api/entries/:id`
@@ -215,7 +221,10 @@ any conversion or modification and teaches the preference model.
 `GET /api/recipes`). That exact recipe is used, with no AI call. A recipe outside the top options is allowed, but only after the
 same allergy, diet and real-ingredient checks as everything else; one that is not safe for the user is refused. Either way the
 answer is `422` when it can't be used. Without `recipeId`, the AI (or the top-ranked recipe) chooses.
-This is how a saved or browsed recipe is put on a day: `POST /api/swap { entryId, recipeId }`.
+This is how a saved or browsed recipe **replaces** a meal: `POST /api/swap { entryId, recipeId }`. To add it as another meal instead, use `POST /api/plan/entries`.
+
+Replacing means the user is not eating the old meal, so any meal log on that entry (ate it, changed it, skipped) is **removed**. The answer includes
+`clearedLog: true` when that happened, so the app can say so.
 
 `request` is optional plain text up to 200 characters, such as `"something with chicken"`, `"Thai noodles"` or
 `"lighter, no onions"`. Words after "no", "without" or "avoid" are things to leave out. The new recipe is chosen from

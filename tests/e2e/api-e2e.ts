@@ -220,6 +220,29 @@ async function main() {
     check("a recipe id on a planned-meal log is rejected (400)", (await call("/api/meal-logs", { json: { entryId: entries[4].id, status: "eaten_as_planned", recipeId: picked.id } })).status === 400);
     check("logging a recipe that does not exist is 404", (await call("/api/meal-logs", { json: { status: "ad_hoc", recipeId: "no-such-recipe" } })).status === 404);
 
+    console.log("\n9g. Add as another meal never replaces; replacing removes the 'ate it' log");
+    const eatenEntry = entries[4]; // logged as eaten earlier in this run
+    const eatenDay = String(eatenEntry.date).slice(0, 10);
+    const before = (await call("/api/plan")).body.plan.entries.filter((e: { date: string }) => String(e.date).slice(0, 10) === eatenDay);
+    const extraRecipe = list.body.recipes[1];
+    const added = await call("/api/plan/entries", { json: { date: eatenDay, mealType: "dinner", recipeId: extraRecipe.id } });
+    check("adding a recipe to a day answers 201 with a new entry", added.status === 201 && added.body?.entry?.recipe?.id === extraRecipe.id, `status ${added.status} ${added.body?.error ?? ""}`);
+    const after = (await call("/api/plan")).body.plan.entries.filter((e: { date: string }) => String(e.date).slice(0, 10) === eatenDay);
+    check("the day has one more meal and the earlier ones are unchanged", after.length === before.length + 1 && before.every((b: { id: string; recipe: { id: string } }) => after.some((a: { id: string; recipe: { id: string } }) => a.id === b.id && a.recipe.id === b.recipe.id)));
+    const logsAfterAdd = (await call(`/api/meal-logs?from=${eatenDay}&to=${eatenDay}`)).body.logs ?? [];
+    check("the 'I ate it' log on the original meal is still there", logsAfterAdd.some((l: { entryId: string; status: string }) => l.entryId === eatenEntry.id && l.status === "eaten_as_planned"));
+    if (unsafe) check("a recipe with a peanut allergen cannot be added (422)", (await call("/api/plan/entries", { json: { date: eatenDay, recipeId: unsafe.id } })).status === 422);
+    check("a recipe that does not exist cannot be added (422)", (await call("/api/plan/entries", { json: { date: eatenDay, recipeId: "no-such-recipe" } })).status === 422);
+    check("a date far in the future is refused (400)", (await call("/api/plan/entries", { json: { date: "2099-01-01", recipeId: extraRecipe.id } })).status === 400);
+    check("no token -> 401", (await call("/api/plan/entries", { json: { date: eatenDay, recipeId: extraRecipe.id }, auth: false })).status === 401);
+    const replacement = list.body.recipes[2];
+    const replaced = await call("/api/swap", { json: { entryId: eatenEntry.id, recipeId: replacement.id } });
+    check("replacing the eaten meal works and says the log was removed", replaced.status === 200 && replaced.body?.entry?.recipe?.id === replacement.id && replaced.body?.clearedLog === true, `status ${replaced.status}`);
+    const logsAfterSwap = (await call(`/api/meal-logs?from=${eatenDay}&to=${eatenDay}`)).body.logs ?? [];
+    check("the old 'ate it' log is gone after replacing", !logsAfterSwap.some((l: { entryId: string }) => l.entryId === eatenEntry.id));
+    const swapAgain = await call("/api/swap", { json: { entryId: entries[1].id, recipeId: list.body.recipes[3].id } });
+    check("replacing a meal that was never logged reports no log removed", swapAgain.status === 200 && swapAgain.body?.clearedLog === false, `status ${swapAgain.status}`);
+
     console.log("\n9e. Change a recipe in words, and create one (AI)");
     const mod = await call("/api/modify", { json: { entryId: entries[3].id, request: "use less salt" } });
     check("change request answers 200, or 422 when it cannot be made safely", mod.status === 200 || mod.status === 422, `status ${mod.status}`);
