@@ -267,57 +267,111 @@ function MealCard({
   );
 }
 
+type SwapOption = { recipeId: string; name: string; calories: number; proteinG: number | null; tags: string[]; note: string };
+type OptionsResult = { options: SwapOption[]; matchedRequest: boolean | null; note: string | null };
+
 function SwapSheet({ entry, onClose, onSwapped }: { entry: Entry; onClose: () => void; onSwapped: (r: SwapResult) => void }) {
   const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [asked, setAsked] = useState(""); // the request the shown options are for
+  const [res, setRes] = useState<OptionsResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [choosing, setChoosing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
 
-  async function go() {
-    setBusy(true);
+  const fail = (e: unknown) => {
+    const status = e instanceof ApiError ? e.status : 0;
+    setError(status === 429 ? "Please wait a minute and try again." : status === 422 ? "No other recipe fits right now. Try different words." : (e as Error).message);
+  };
+
+  const find = useCallback(
+    async (request: string) => {
+      setLoading(true);
+      setError(null);
+      try {
+        setRes(await api<OptionsResult>("/api/swap/options", { method: "POST", json: { entryId: entry.id, ...(request ? { request } : {}) } }));
+        setAsked(request);
+      } catch (e) {
+        fail(e);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [entry.id],
+  );
+
+  useEffect(() => {
+    find("");
+  }, [find]);
+
+  async function choose(o: SwapOption) {
+    setChoosing(o.recipeId);
     setError(null);
-    setNote(null);
     try {
-      const res = await api<SwapResult>("/api/swap", { method: "POST", json: { entryId: entry.id, ...(text.trim() ? { request: text.trim() } : {}) } });
-      if (res.matchedRequest === false) setNote(res.reason); // show why, then still use the normal swap it did
-      onSwapped(res);
+      onSwapped(await api<SwapResult>("/api/swap", { method: "POST", json: { entryId: entry.id, recipeId: o.recipeId, ...(asked ? { request: asked } : {}) } }));
     } catch (e) {
-      const status = e instanceof ApiError ? e.status : 0;
-      setError(
-        status === 429 ? "Please wait a minute and try again." : status === 422 ? "No other recipe fits right now. Try different words." : (e as Error).message,
-      );
-    } finally {
-      setBusy(false);
+      fail(e);
+      setChoosing(null);
+      find(asked); // the pool may have changed: refresh the list
     }
   }
 
   return (
     <Sheet title="Swap today's pick" onClose={onClose}>
-      <p className="mb-4 text-[14px] leading-relaxed text-ink-muted">
-        We pick a close match from your safe recipes, by calories and your tastes. Or say what you want instead.
-      </p>
-      <label htmlFor="swap-ask" className="sr-only">
-        Describe what you want instead
-      </label>
-      <input
-        id="swap-ask"
-        value={text}
-        maxLength={200}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && !busy && go()}
-        placeholder="Optional: something with chicken, no beans"
-        className="mb-3 h-[50px] w-full rounded-full border border-line px-[18px] text-[15px] outline-none focus:border-ink"
-      />
-      <Button onClick={go} loading={busy}>
-        {text.trim() ? "Swap with my request" : "Find another"}
-      </Button>
-      {busy && <p className="mt-3 text-center text-[13px] text-ink-muted">This can take up to 30 seconds.</p>}
-      {note && <p className="mt-3 text-[13px] text-ink-muted">{note}</p>}
+      <p className="mb-3.5 text-[14px] leading-relaxed text-ink-muted">Close matches from your safe recipes, ranked by calories and your tastes.</p>
+      {loading && (
+        <div className="flex justify-center py-7">
+          <Spinner />
+        </div>
+      )}
+      {!loading && res?.note && <p className="mb-2 text-[13px] text-ink-muted">{res.note}</p>}
+      {!loading &&
+        res?.options.map((o) => (
+          <button
+            key={o.recipeId}
+            type="button"
+            disabled={choosing !== null}
+            onClick={() => choose(o)}
+            aria-label={`Swap to ${o.name}, ${Math.round(o.calories)} calories`}
+            className={cx("flex w-full items-center gap-3.5 border-t border-line py-3.5 text-left", choosing && choosing !== o.recipeId && "opacity-40")}
+          >
+            <span className="flex h-[52px] w-[52px] flex-none items-center justify-center overflow-hidden rounded-2xl bg-surface">
+              <BowlArt size={36} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[16px] font-medium">{o.name}</span>
+              <span className="mt-0.5 block text-[13px] text-ink-muted">{o.note}</span>
+            </span>
+            {choosing === o.recipeId ? <Spinner /> : <strong className="text-[15px] font-semibold">{Math.round(o.calories)}</strong>}
+          </button>
+        ))}
+      <form
+        className="flex items-center gap-2.5 border-t border-line pt-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!loading) find(text.trim());
+        }}
+      >
+        <label htmlFor="swap-ask" className="sr-only">
+          Describe what you want instead
+        </label>
+        <input
+          id="swap-ask"
+          value={text}
+          maxLength={200}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Or describe it, like no beans"
+          className="h-[50px] min-w-0 flex-1 rounded-full border border-line px-[18px] text-[15px] outline-none focus:border-ink"
+        />
+        <button type="submit" disabled={loading} aria-label="Find options" className="flex h-[50px] w-[50px] flex-none items-center justify-center rounded-full bg-brand text-white disabled:opacity-50">
+          <svg aria-hidden width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 19V5M5 12l7-7 7 7" />
+          </svg>
+        </button>
+      </form>
       <ErrorText>{error}</ErrorText>
     </Sheet>
   );
 }
-
 function WeighInCard({ last, onSaved }: { last?: WeighIn; onSaved: (log: WeighIn, adj: Adjustment) => void }) {
   const [value, setValue] = useState(last ? String(last.weightKg) : "");
   const [busy, setBusy] = useState(false);

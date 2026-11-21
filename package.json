@@ -10,6 +10,7 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:e2e": "tsx tests/e2e/backend-e2e.ts",
+    "test:api-e2e": "tsx tests/e2e/api-e2e.ts",
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

@@ -1,5 +1,5 @@
 import { Link, router, useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import BowlArt from "@/components/BowlArt";
 import { Button, ErrorText, H1, Muted, Page, Sheet, Spinner } from "@/components/ui";
@@ -205,45 +205,101 @@ function MealCard({ entry, profile, target, reason, onSwap }: { entry: Entry; pr
   );
 }
 
+type SwapOption = { recipeId: string; name: string; calories: number; proteinG: number | null; tags: string[]; note: string };
+type OptionsResult = { options: SwapOption[]; matchedRequest: boolean | null; note: string | null };
+
 function SwapSheet({ entry, onClose, onSwapped }: { entry: Entry; onClose: () => void; onSwapped: (r: SwapResult) => void }) {
   const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [asked, setAsked] = useState<string>(""); // the request the shown options are for
+  const [res, setRes] = useState<OptionsResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [choosing, setChoosing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function go() {
-    setBusy(true);
+  const fail = (e: unknown) => {
+    const status = e instanceof ApiError ? e.status : 0;
+    setError(status === 429 ? "Please wait a minute and try again." : status === 422 ? "No other recipe fits right now. Try different words." : (e as Error).message);
+  };
+
+  const find = useCallback(
+    async (request: string) => {
+      setLoading(true);
+      setError(null);
+      try {
+        setRes(await api<OptionsResult>("/api/swap/options", { method: "POST", json: { entryId: entry.id, ...(request ? { request } : {}) } }));
+        setAsked(request);
+      } catch (e) {
+        fail(e);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [entry.id],
+  );
+
+  useEffect(() => {
+    find("");
+  }, [find]);
+
+  async function choose(o: SwapOption) {
+    setChoosing(o.recipeId);
     setError(null);
     try {
-      const res = await api<SwapResult>("/api/swap", { method: "POST", json: { entryId: entry.id, ...(text.trim() ? { request: text.trim() } : {}) } });
-      onSwapped(res); // res.reason says why it fits, or that nothing matched the request
+      onSwapped(await api<SwapResult>("/api/swap", { method: "POST", json: { entryId: entry.id, recipeId: o.recipeId, ...(asked ? { request: asked } : {}) } }));
     } catch (e) {
-      const status = e instanceof ApiError ? e.status : 0;
-      setError(status === 429 ? "Please wait a minute and try again." : status === 422 ? "No other recipe fits right now. Try different words." : (e as Error).message);
-      setBusy(false);
+      fail(e);
+      setChoosing(null);
+      find(asked); // the pool may have changed: refresh the list
     }
   }
 
   return (
     <Sheet title="Swap today's pick" onClose={onClose}>
-      <Muted style={{ marginBottom: 14 }}>We pick a close match from your safe recipes, by calories and your tastes. Or say what you want instead.</Muted>
-      <TextInput
-        accessibilityLabel="Describe what you want instead"
-        value={text}
-        onChangeText={setText}
-        maxLength={200}
-        placeholder="Optional: something with chicken, no beans"
-        placeholderTextColor="#9A9A96"
-        onSubmitEditing={() => !busy && go()}
-        returnKeyType="go"
-        style={{ height: 50, borderWidth: 1, borderColor: c.line, borderRadius: 25, paddingHorizontal: 18, fontSize: 15, marginBottom: 12 }}
-      />
-      <Button title={text.trim() ? "Swap with my request" : "Find another"} onPress={go} loading={busy} />
-      {busy && <Muted style={{ textAlign: "center", marginTop: 12, fontSize: 13 }}>This can take up to 30 seconds.</Muted>}
+      <Muted style={{ marginBottom: 14 }}>Close matches from your safe recipes, ranked by calories and your tastes.</Muted>
+
+      {loading && <View style={{ paddingVertical: 28 }}><Spinner /></View>}
+      {!loading && res?.note ? <Muted style={{ marginBottom: 8, fontSize: 13 }}>{res.note}</Muted> : null}
+      {!loading &&
+        res?.options.map((o) => (
+          <Pressable
+            key={o.recipeId}
+            accessibilityRole="button"
+            accessibilityLabel={`Swap to ${o.name}, ${Math.round(o.calories)} calories`}
+            disabled={choosing !== null}
+            onPress={() => choose(o)}
+            style={{ flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 14, borderTopWidth: 1, borderTopColor: c.line, opacity: choosing && choosing !== o.recipeId ? 0.4 : 1 }}
+          >
+            <View style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: c.surface, alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+              <BowlArt size={36} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text numberOfLines={2} style={{ fontSize: 16, fontWeight: "500" }}>{o.name}</Text>
+              <Text style={{ fontSize: 13, color: c.muted, marginTop: 2 }}>{o.note}</Text>
+            </View>
+            {choosing === o.recipeId ? <Spinner /> : <Text style={{ fontSize: 15, fontWeight: "600" }}>{Math.round(o.calories)}</Text>}
+          </Pressable>
+        ))}
+
+      <View style={{ borderTopWidth: 1, borderTopColor: c.line, paddingTop: 16, flexDirection: "row", gap: 10, alignItems: "center" }}>
+        <TextInput
+          accessibilityLabel="Describe what you want instead"
+          value={text}
+          onChangeText={setText}
+          maxLength={200}
+          placeholder="Or describe it, like no beans"
+          placeholderTextColor="#9A9A96"
+          onSubmitEditing={() => !loading && find(text.trim())}
+          returnKeyType="search"
+          style={{ flex: 1, height: 50, borderWidth: 1, borderColor: c.line, borderRadius: 25, paddingHorizontal: 18, fontSize: 15 }}
+        />
+        <Pressable accessibilityRole="button" accessibilityLabel="Find options" disabled={loading} onPress={() => find(text.trim())} style={{ width: 50, height: 50, borderRadius: 25, backgroundColor: c.brand, alignItems: "center", justifyContent: "center", opacity: loading ? 0.5 : 1 }}>
+          <Text style={{ color: c.white, fontSize: 20, fontWeight: "600" }}>↑</Text>
+        </Pressable>
+      </View>
       <ErrorText>{error}</ErrorText>
     </Sheet>
   );
 }
-
 function WeighInCard({ last, onSaved }: { last?: WeighIn; onSaved: (log: WeighIn, adj: Adjustment) => void }) {
   const [value, setValue] = useState(last ? String(last.weightKg) : "");
   const [busy, setBusy] = useState(false);

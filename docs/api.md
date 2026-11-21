@@ -138,9 +138,24 @@ Note: Food.com ingredients have **no real quantities** (`quantity: 1, unit: "ite
 
 ## Swap, convert, modify, generate
 
+### `POST /api/swap/options`
+`{ "entryId": "…", "request": "no beans" }` (`request` optional) returns up to 3 safe, ranked replacements for that
+meal, for the swap sheet. **Read-only**: nothing is changed and the AI is not called (fast, and it does not use the
+AI budget). Every option already passed the diet, allergy and ingredient checks.
+```json
+{ "options": [ { "recipeId": "…", "name": "Lentil and spinach curry", "calories": 610, "proteinG": 28, "tags": ["indian"],
+                 "note": "On target for this meal · matches indian dishes you like" } ],
+  "matchedRequest": true, "note": null }
+```
+`note` is set (and `matchedRequest` is `false`) when nothing matched the request and close alternatives are shown.
+`404` unknown entry, `422` nothing fits. Send the chosen `recipeId` to `POST /api/swap`.
+
 ### `POST /api/swap`
-`{ "entryId": "…", "request": "something with chicken" }` replaces that meal with another that fits the user. Clears
+`{ "entryId": "…", "request": "something with chicken", "recipeId": "…" }` replaces that meal with another that fits the user. Clears
 any conversion or modification and teaches the preference model.
+
+`recipeId` (optional) is a choice from `/api/swap/options`. That exact recipe is used, with no AI call, but only if it is
+still in the user's safe pool; otherwise `422`. Without it, the AI (or the top-ranked recipe) chooses.
 
 `request` is optional plain text up to 200 characters, such as `"something with chicken"`, `"Thai noodles"` or
 `"lighter, no onions"`. Words after "no", "without" or "avoid" are things to leave out. The new recipe is chosen from

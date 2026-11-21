@@ -339,7 +339,15 @@ export async function recommendForDay(
  * recipes that match those words, still inside the user's diet and allergy filters, and the AI
  * picks the best of them. If nothing matches, a normal swap is done and `matchedRequest` is false.
  */
-export async function swapEntry(userId: string, entryId: string, request?: string) {
+/** How many alternatives the swap sheet offers. */
+const SWAP_OPTIONS = 3;
+
+/**
+ * The safe, ranked pool a swap draws from: the user's diet and allergy filters, the ingredient-level
+ * safety net, recipes not already used this week or recently, and (when asked) their text request.
+ * Shared by `swapOptions` (shows the best few) and `swapEntry` (applies one).
+ */
+async function swapPool(userId: string, entryId: string, request?: string) {
   const entry = await prisma.planEntry.findFirst({ where: { id: entryId, userId } });
   if (!entry) throw new HttpError(404, "Plan entry not found");
 
@@ -359,14 +367,62 @@ export async function swapEntry(userId: string, entryId: string, request?: strin
     found = await shortlistFor(userId, ctx, mealType, exclude, avoidOnly);
     if (found.shortlist.length === 0) found = await shortlistFor(userId, ctx, mealType, exclude);
   }
-  const { shortlist, targetCalories, taste } = found;
-  if (shortlist.length === 0) throw new HttpError(422, "No other recipes match your diet and allergies");
+  if (found.shortlist.length === 0) throw new HttpError(422, "No other recipes match your diet and allergies");
+  const note =
+    matchedRequest === false
+      ? `Nothing matched "${wish!.text}" within your diet and allergies, so here is a close alternative${wish!.avoid.length > 0 ? ` without ${wish!.avoid.join(" or ")}` : ""}.`
+      : null;
+  return { entry, ctx, mealType, wish, matchedRequest, note, ...found };
+}
 
-  const choice = await pickFrom(userId, shortlist, {
-    targetCalories,
-    likedTags: topTags(taste).liked,
-    wish: matchedRequest ? wish!.text : undefined,
-  });
+/**
+ * The best few swap choices for one plan entry, shown in the swap sheet. Nothing is changed and the AI
+ * is not called, so this is fast and does not use the user's AI budget. Every option has already passed
+ * the diet, allergy and ingredient checks. Pick one with `swapEntry(..., { recipeId })`.
+ */
+export async function swapOptions(userId: string, entryId: string, request?: string) {
+  const { shortlist, targetCalories, taste, matchedRequest, note } = await swapPool(userId, entryId, request);
+  const liked = new Set(topTags(taste).liked);
+  const options = shortlist.slice(0, SWAP_OPTIONS).map((r) => ({
+    recipeId: r.id,
+    name: r.name,
+    calories: r.calories,
+    proteinG: r.proteinG ?? null,
+    tags: r.tags,
+    note: describeOption(r, targetCalories, liked),
+  }));
+  return { options, matchedRequest, note };
+}
+
+/** One short, honest line on why an option fits, from numbers and tags we already have (not AI text). */
+export function describeOption(r: Pick<RecipeLite, "calories" | "tags">, targetCalories: number, liked: Set<string>): string {
+  const likedTag = r.tags.find((t) => liked.has(t));
+  const diff = Math.round(r.calories - targetCalories);
+  const fit = Math.abs(diff) <= Math.max(25, targetCalories * 0.05) ? "On target for this meal" : diff < 0 ? `${Math.abs(diff)} kcal lighter than your target` : `${diff} kcal above your target`;
+  return likedTag ? `${fit} · matches ${likedTag.replace(/-/g, " ")} dishes you like` : fit;
+}
+
+/**
+ * Replace the recipe on one plan entry. By default the AI (or the top-ranked recipe) chooses from the safe
+ * pool. With `recipeId` the user's own pick from the swap sheet is used instead, but only if it is still in
+ * that safe pool, so a made-up or unsafe id is refused (422) and no AI call is made.
+ */
+export async function swapEntry(userId: string, entryId: string, request?: string, recipeId?: string) {
+  const { entry, shortlist, targetCalories, taste, wish, matchedRequest, note } = await swapPool(userId, entryId, request);
+
+  let choice: Choice;
+  if (recipeId) {
+    const picked = shortlist.find((r) => r.id === recipeId);
+    if (!picked) throw new HttpError(422, "That recipe is no longer available as a swap. Pick another.");
+    choice = { recipeId: picked.id, reason: "You chose this one.", fromAi: false };
+  } else {
+    choice = await pickFrom(userId, shortlist, {
+      targetCalories,
+      likedTags: topTags(taste).liked,
+      wish: matchedRequest ? wish!.text : undefined,
+    });
+  }
+
   const updated = await prisma.planEntry.update({
     where: { id: entry.id },
     data: {
@@ -379,11 +435,7 @@ export async function swapEntry(userId: string, entryId: string, request?: strin
   });
   await recordSignal(userId, entry.recipeId, "swap_out");
   await recordSignal(userId, choice.recipeId, "swap_in");
-  const reason =
-    matchedRequest === false
-      ? `Nothing matched "${wish!.text}" within your diet and allergies, so here is a close alternative${wish!.avoid.length > 0 ? ` without ${wish!.avoid.join(" or ")}` : ""}.`
-      : choice.reason;
-  return { entry: formatEntry(updated), reason, fromAi: choice.fromAi, matchedRequest };
+  return { entry: formatEntry(updated), reason: !recipeId && note ? note : choice.reason, fromAi: choice.fromAi, matchedRequest };
 }
 
 // ---------- recipe detail ----------
