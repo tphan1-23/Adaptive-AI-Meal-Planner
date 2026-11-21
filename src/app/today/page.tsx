@@ -231,7 +231,7 @@ function MealCard({
   return (
     <section aria-label="Recommended recipe" className="flex flex-col gap-3.5">
       <Link href={`/recipes/${entry.id}`} aria-label={`Open ${r.name}`} className="flex h-[210px] items-center justify-center rounded-[28px] bg-surface">
-        <BowlArt />
+        <BowlArt name={r.name} tags={r.tags} />
       </Link>
       <p className="text-[13px] text-ink-muted">{tags.join(" · ")}</p>
       <h2 className="text-[26px] font-semibold leading-tight tracking-tight">{r.name}</h2>
@@ -335,7 +335,7 @@ function SwapSheet({ entry, onClose, onSwapped }: { entry: Entry; onClose: () =>
             className={cx("flex w-full items-center gap-3.5 border-t border-line py-3.5 text-left", choosing && choosing !== o.recipeId && "opacity-40")}
           >
             <span className="flex h-[52px] w-[52px] flex-none items-center justify-center overflow-hidden rounded-2xl bg-surface">
-              <BowlArt size={36} />
+              <BowlArt size={36} name={o.name} tags={o.tags} />
             </span>
             <span className="min-w-0 flex-1">
               <span className="block text-[16px] font-medium">{o.name}</span>

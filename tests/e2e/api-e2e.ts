@@ -97,6 +97,13 @@ async function main() {
     const afterPlan = (await call("/api/plan")).body?.plan?.entries ?? [];
     check("plan now shows the new recipe", afterPlan.some((e: { id: string; recipe: { id: string } }) => e.id === entry.id && e.recipe.id === pick.recipeId));
 
+    console.log("\n4b. AI-backed routes (use the Gemini key; fall back safely if the AI is down)");
+    const aiSwap = await call("/api/swap", { json: { entryId: entries[1].id } });
+    check("AI swap returns a new entry with a reason", aiSwap.status === 200 && !!aiSwap.body?.entry?.recipe?.id && typeof aiSwap.body?.reason === "string", `status ${aiSwap.status}, fromAi ${aiSwap.body?.fromAi}`);
+    const conv = await call("/api/convert", { json: { entryId: entry.id } });
+    check("convert answers 200 with available true/false", conv.status === 200 && typeof conv.body?.available === "boolean", `status ${conv.status}, available ${conv.body?.available}`);
+    check("convert always returns steps", Array.isArray(conv.body?.steps) && conv.body.steps.length > 0);
+
     console.log("\n5. Recipe, logging, progress, shopping");
     const detail = await call(`/api/entries/${entry.id}`);
     check("entry detail has recipe, steps and ingredients", detail.status === 200 && detail.body?.recipe?.ingredients?.length > 0);

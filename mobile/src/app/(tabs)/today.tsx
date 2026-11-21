@@ -177,7 +177,7 @@ function MealCard({ entry, profile, target, reason, onSwap }: { entry: Entry; pr
     <View style={{ gap: 14 }} accessibilityLabel="Recommended recipe">
       <Link href={`/recipes/${entry.id}`} asChild>
         <Pressable accessibilityRole="link" accessibilityLabel={`Open ${r.name}`} style={{ height: 210, borderRadius: 28, backgroundColor: c.surface, alignItems: "center", justifyContent: "center" }}>
-          <BowlArt />
+          <BowlArt name={r.name} tags={r.tags} />
         </Pressable>
       </Link>
       <Muted style={{ fontSize: 13 }}>{tags.join(" · ")}</Muted>
@@ -270,7 +270,7 @@ function SwapSheet({ entry, onClose, onSwapped }: { entry: Entry; onClose: () =>
             style={{ flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 14, borderTopWidth: 1, borderTopColor: c.line, opacity: choosing && choosing !== o.recipeId ? 0.4 : 1 }}
           >
             <View style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: c.surface, alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-              <BowlArt size={36} />
+              <BowlArt size={36} name={o.name} tags={o.tags} />
             </View>
             <View style={{ flex: 1 }}>
               <Text numberOfLines={2} style={{ fontSize: 16, fontWeight: "500" }}>{o.name}</Text>
