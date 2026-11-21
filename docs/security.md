@@ -74,3 +74,10 @@ These live in the Supabase settings, so they cannot be checked from the code. So
 - `npm run test:e2e` runs Thanh's end-to-end script against the real database.
 - `npm audit --omit=dev` lists dependency advisories.
 - A cross-user check: sign in as two test users and request one user's entry id as the other (expect `404`).
+
+## Hosting on Vercel (free Hobby plan)
+- The web app and API run on Vercel; `vercel.json` sets the region next to the database and gives the API routes a 60-second limit (the AI calls take 5 to 25 seconds).
+- Secrets (`SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`, `DATABASE_URL`, `DIRECT_URL`) are stored as sensitive environment variables in the Vercel project, never in the repo. The two `NEXT_PUBLIC_` values are public by design.
+- Deployed from the command line (`vercel deploy --prod`), not connected to GitHub, so a push never deploys by itself.
+- In Supabase (Authentication, URL Configuration) the deployed address and its `/reset-password` page must be allowed redirect URLs.
+- The phone app uses the deployed address as `EXPO_PUBLIC_API_URL` in `mobile/.env`.
