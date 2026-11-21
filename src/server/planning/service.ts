@@ -12,7 +12,7 @@ import { filterRecipes, ingredientsHaveAllergen } from "./filter";
 import { generatePlan, MEAL_SHARE } from "./generate-plan";
 import { MEAL_TAGS } from "./meal-types";
 import { rankRecipes } from "./rank";
-import { violatesDiet } from "./substitution";
+import { ingredientNamesOf, modificationFits, namesBreakRules, recipeFits } from "./safety";
 import { applyWish, ingredientsMentionAvoided, searchTerms, type ParsedWish, parseWish } from "./wish";
 import { addDays, isoOf, mondayOf, toDate, todayIso } from "./week";
 
@@ -150,10 +150,13 @@ const planInclude = { entries: { include: entryInclude } } satisfies Prisma.Week
 /** The user's plan for the week containing `date` (default: this week), or null. */
 export async function getWeekPlan(userId: string, date?: string) {
   const weekStart = mondayOf(date ?? todayIso());
-  const plan = await prisma.weeklyPlan.findUnique({
-    where: { userId_weekStart: { userId, weekStart: toDate(weekStart) } },
-    include: planInclude,
-  });
+  const where = { userId_weekStart: { userId, weekStart: toDate(weekStart) } };
+  let plan = await prisma.weeklyPlan.findUnique({ where, include: planInclude });
+  if (plan && plan.entries.length > 0) {
+    if ((await repairUnsafeEntries(userId, plan.id, await getPlanningContext(userId))) > 0) {
+      plan = await prisma.weeklyPlan.findUnique({ where, include: planInclude });
+    }
+  }
   return plan ? formatPlan(plan) : null;
 }
 
@@ -166,9 +169,13 @@ export async function createWeekPlan(userId: string, date?: string, regenerate =
   const where = { userId_weekStart: { userId, weekStart: toDate(weekStart) } };
 
   const existing = await prisma.weeklyPlan.findUnique({ where, include: planInclude });
-  if (existing && existing.entries.length > 0 && !regenerate) return formatPlan(existing);
-
   const ctx = await getPlanningContext(userId);
+  if (existing && existing.entries.length > 0 && !regenerate) {
+    // Same plan as before, but meals that no longer fit the user's current rules are replaced first.
+    if ((await repairUnsafeEntries(userId, existing.id, ctx)) === 0) return formatPlan(existing);
+    return formatPlan(await prisma.weeklyPlan.findUniqueOrThrow({ where, include: planInclude }));
+  }
+
   const [recent, taste] = await Promise.all([
     recentRecipeIds(userId, weekStart),
     getTasteScores(userId, ctx.cuisines),
@@ -249,20 +256,58 @@ async function dropUnsafeByIngredients(
   const bad = new Set(
     rows
       .filter((r) => {
-        const names = ingredientNames(r.ingredients);
-        return (
-          ingredientsHaveAllergen(names, profile.allergies) ||
-          names.some((n) => violatesDiet({ name: n, category: null }, profile.diet)) ||
-          (wish ? ingredientsMentionAvoided(names, wish) : false)
-        );
+        const names = ingredientNamesOf(r.ingredients);
+        return namesBreakRules(names, profile) || (wish ? ingredientsMentionAvoided(names, wish) : false);
       })
       .map((r) => r.id),
   );
   return head.filter((r) => !bad.has(r.id));
 }
 
-function ingredientNames(json: unknown): string[] {
-  return Array.isArray(json) ? json.map((i) => String((i as { name?: unknown })?.name ?? "")) : [];
+/**
+ * Meals in a plan were chosen under the user's rules at the time. If they later change their
+ * allergies or diet (for example by redoing onboarding), meals that no longer fit must not stay.
+ * Each remaining meal from today on that breaks the current rules is replaced with the best safe
+ * recipe (no AI involved); if only the user's AI modification is the problem it is undone; if
+ * nothing safe exists the meal is removed. Past days are history and are left alone.
+ * Returns how many meals were changed.
+ */
+export async function repairUnsafeEntries(userId: string, planId: string, ctx: UserPlanningContext): Promise<number> {
+  const entries = await prisma.planEntry.findMany({
+    where: { planId, userId },
+    select: {
+      id: true, date: true, mealType: true, recipeId: true, modifiedRecipe: true,
+      recipe: { select: { allergens: true, diets: true, ingredients: true } },
+    },
+  });
+  const today = todayIso();
+  const broken = entries.filter(
+    (e) => isoOf(e.date) >= today && (!recipeFits(e.recipe, ctx) || !modificationFits(e.modifiedRecipe, ctx)),
+  );
+  if (broken.length === 0) return 0;
+
+  const used = new Set(entries.map((e) => e.recipeId));
+  for (const e of broken) {
+    if (recipeFits(e.recipe, ctx)) {
+      // Only the user's own modification is the problem: go back to the original recipe.
+      await prisma.planEntry.update({
+        where: { id: e.id },
+        data: { modifiedRecipe: Prisma.DbNull, convertedSteps: [], convertedForEquipment: [] },
+      });
+      continue;
+    }
+    const { shortlist } = await shortlistFor(userId, ctx, e.mealType as MealType, [...used]);
+    if (shortlist.length === 0) {
+      await prisma.planEntry.delete({ where: { id: e.id } });
+      continue;
+    }
+    used.add(shortlist[0].id);
+    await prisma.planEntry.update({
+      where: { id: e.id },
+      data: { recipeId: shortlist[0].id, modifiedRecipe: Prisma.DbNull, convertedSteps: [], convertedForEquipment: [] },
+    });
+  }
+  return broken.length;
 }
 
 /**
@@ -302,6 +347,13 @@ export async function recommendForDay(
     update: {},
     include: { entries: { select: { recipeId: true, date: true, mealType: true, position: true } } },
   });
+
+  if (wp.entries.length > 0 && (await repairUnsafeEntries(userId, wp.id, ctx)) > 0) {
+    wp.entries = await prisma.planEntry.findMany({
+      where: { planId: wp.id },
+      select: { recipeId: true, date: true, mealType: true, position: true },
+    });
+  }
 
   const sameSlot = wp.entries.filter((e) => isoOf(e.date) === input.date && e.mealType === input.mealType);
   if (sameSlot.length > 0 && !input.extra) {
