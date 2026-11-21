@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { APP_NAME } from "@/lib/brand";
 import { createSupabaseBrowser } from "@/lib/supabase-browser";
 import { safeNextPath } from "@/server/auth/routes";
 import { Button, ErrorText, Input, Label, Segmented } from "@/components/ui";
@@ -93,7 +94,8 @@ function LoginForm() {
   return (
     <main className="flex flex-1 flex-col px-5 pb-6 pt-12">
       <form onSubmit={submit} className="flex flex-1 flex-col" noValidate>
-        <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-soft text-3xl">🍽</div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/icons/icon-192.png" alt={APP_NAME} width={64} height={64} className="mb-5 h-16 w-16 rounded-[18px]" />
         <h1 className="mb-2 text-[26px] font-bold leading-tight">
           {mode === "signin" ? "Welcome back" : "Create your account"}
         </h1>

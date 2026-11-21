@@ -1,7 +1,7 @@
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, ErrorText, Input, Label, Muted, Segmented } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -75,9 +75,7 @@ export default function Login() {
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.white }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: 20, paddingTop: insets.top + 40, paddingBottom: insets.bottom + 20 }} keyboardShouldPersistTaps="handled">
-        <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: c.brandSoft, alignItems: "center", justifyContent: "center", marginBottom: 20 }}>
-          <Text style={{ fontSize: 28 }}>🍽</Text>
-        </View>
+        <Image source={require("../../assets/icon.png")} accessibilityLabel="Forkcast" style={{ width: 64, height: 64, borderRadius: 18, marginBottom: 20 }} />
         <Text accessibilityRole="header" style={{ fontSize: 30, fontWeight: "600", letterSpacing: -0.8, marginBottom: 8 }}>
           {mode === "signin" ? "Welcome back" : "Create your account"}
         </Text>
