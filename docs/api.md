@@ -108,8 +108,8 @@ Returns the existing plan unless `regenerate` is `true`. Respects allergies and 
 
 **If the user changed their allergies or diet since the plan was made** (for example by redoing onboarding), every meal
 from today onwards that no longer fits is replaced with a safe one before the plan is returned, by both `POST` and
-`GET /api/plan` (same plan id, same days). An AI modification that no longer fits is undone, and meals on past days
-are left as history. So the frontend does not need to regenerate the plan after a profile edit; just read it again.
+`GET /api/plan` (same plan id, same days). An AI modification that no longer fits is undone. A meal on a day that has
+already passed is only kept if the user logged eating it. So the frontend does not need to regenerate the plan after a profile edit; just read it again.
 Errors: `409` onboarding not finished, `422` no recipes match.
 
 ### `POST /api/recommendation`
