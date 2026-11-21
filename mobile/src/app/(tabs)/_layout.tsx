@@ -52,7 +52,18 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen name="progress" options={{ title: "Progress", tabBarIcon: icon(() => <Path d="M4 18 9 12l4 3 7-9" />) }} />
-      <Tabs.Screen name="saved" options={{ title: "Saved", tabBarIcon: icon(() => <Path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.600-7 10-7 10Z" />) }} />
+      <Tabs.Screen
+        name="saved"
+        options={{
+          title: "Recipes",
+          tabBarIcon: icon(() => (
+            <>
+              <Circle cx="11" cy="11" r="6.500" />
+              <Path d="m20 20-4.200-4.200" />
+            </>
+          )),
+        }}
+      />
       <Tabs.Screen
         name="me"
         options={{

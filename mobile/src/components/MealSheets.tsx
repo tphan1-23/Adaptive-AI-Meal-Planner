@@ -128,3 +128,64 @@ export function FoodSheet({ date, onClose, onSaved }: { date: string; onClose: (
     </Sheet>
   );
 }
+
+/** Log a recipe picked while browsing as something eaten (today or yesterday), then ask how it was. */
+export function EatRecipeSheet({ recipeId, name, calories, onClose, onSaved }: { recipeId: string; name: string; calories: number; onClose: () => void; onSaved: () => void }) {
+  const hour = new Date().getHours();
+  const [mealType, setMealType] = useState<MealTypeName>(hour < 11 ? "breakfast" : hour < 15 ? "lunch" : hour < 21 ? "dinner" : "snack");
+  const [when, setWhen] = useState<"today" | "yesterday">("today");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [logged, setLogged] = useState(false); // after saving: the "How was it?" step
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      const d = new Date();
+      if (when === "yesterday") d.setDate(d.getDate() - 1);
+      const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      await api("/api/meal-logs", { method: "POST", json: { status: "ad_hoc", recipeId, mealType, date } });
+      setLogged(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function rate(value: 5 | 1 | null) {
+    if (value !== null) await api("/api/signals", { method: "POST", json: { recipeId, type: "rating", value } }).catch(() => {}); // a failed rating must not block logging
+    onSaved();
+  }
+
+  if (logged) {
+    return (
+      <Sheet title="How was it?" onClose={() => rate(null)}>
+        <Muted style={{ marginBottom: 14 }}>Logged. Your answer helps the planner pick meals you'll like.</Muted>
+        <View style={{ gap: 10 }}>
+          <Button title="Loved it" onPress={() => rate(5)} />
+          <Button title="It was fine" variant="outline" onPress={() => rate(null)} />
+          <Button title="Not for me" variant="outline" onPress={() => rate(1)} />
+        </View>
+      </Sheet>
+    );
+  }
+
+  return (
+    <Sheet title="Log as eaten" onClose={onClose}>
+      <Muted style={{ marginBottom: 14 }}>{name} · {Math.round(calories)} kcal. It counts toward that day's calories and doesn't change your plan.</Muted>
+      <Label>Which day</Label>
+      <View style={{ flexDirection: "row", gap: 8, marginBottom: 14 }}>
+        <Chip label="Today" selected={when === "today"} onPress={() => setWhen("today")} />
+        <Chip label="Yesterday" selected={when === "yesterday"} onPress={() => setWhen("yesterday")} />
+      </View>
+      <Label>Which meal</Label>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+        {MEAL_TYPES.map((m) => <Chip key={m} label={cap(m)} selected={mealType === m} onPress={() => setMealType(m)} />)}
+      </View>
+      <Button title="Log it" onPress={save} loading={busy} />
+      <ErrorText>{error}</ErrorText>
+    </Sheet>
+  );
+}

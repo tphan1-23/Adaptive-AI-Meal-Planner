@@ -26,6 +26,8 @@ const mealType = z.enum(["breakfast", "lunch", "dinner", "snack"]);
 export const mealLogInput = z
   .object({
     entryId: z.string().min(1).optional(),
+    /** For ad_hoc only: a recipe the user ate (picked while browsing). Its nutrition fills what is not given. */
+    recipeId: z.string().min(1).max(64).optional(),
     date: isoDate.optional(),
     mealType: mealType.optional(),
     status: z.enum(MEAL_STATUSES),
@@ -47,8 +49,10 @@ export const mealLogInput = z
       need(v.calories !== undefined, "calories", "Say roughly how many calories you ate");
     }
     if (v.status === "ad_hoc") {
-      need(v.calories !== undefined, "calories", "Say roughly how many calories you ate");
+      need(v.calories !== undefined || !!v.recipeId, "calories", "Say roughly how many calories you ate");
       need(!v.entryId, "entryId", "An ad hoc meal is not part of the plan");
+    } else {
+      need(!v.recipeId, "recipeId", "A recipe can only be logged as something you ate outside the plan");
     }
   });
 export type MealLogInput = z.infer<typeof mealLogInput>;
@@ -120,6 +124,16 @@ export async function saveMealLog(userId: string, input: MealLogInput) {
     date = input.date ?? todayIso();
     type = input.mealType ?? "dinner";
   }
+  // A browsed recipe logged as eaten: its nutrition and name fill in what the user did not type.
+  let fromRecipe: { name: string; calories: number; proteinG: number | null; carbsG: number | null; fatG: number | null } | null = null;
+  if (input.recipeId) {
+    fromRecipe = await prisma.recipe.findFirst({
+      where: { id: input.recipeId, OR: [{ ownerId: null }, { ownerId: userId }] },
+      select: { name: true, calories: true, proteinG: true, carbsG: true, fatG: true },
+    });
+    if (!fromRecipe) throw new HttpError(404, "Recipe not found");
+    recipeId = input.recipeId;
+  }
   if (date > latestLoggableDate()) throw new HttpError(400, "You cannot log a meal in the future");
 
   const values =
@@ -128,17 +142,17 @@ export async function saveMealLog(userId: string, input: MealLogInput) {
       : input.status === "eaten_as_planned"
         ? { loggedCalories: planned.calories, loggedProteinG: planned.proteinG, loggedCarbsG: planned.carbsG, loggedFatG: planned.fatG }
         : {
-            loggedCalories: input.calories ?? null,
-            loggedProteinG: input.proteinG ?? null,
-            loggedCarbsG: input.carbsG ?? null,
-            loggedFatG: input.fatG ?? null,
+            loggedCalories: input.calories ?? fromRecipe?.calories ?? null,
+            loggedProteinG: input.proteinG ?? fromRecipe?.proteinG ?? null,
+            loggedCarbsG: input.carbsG ?? fromRecipe?.carbsG ?? null,
+            loggedFatG: input.fatG ?? fromRecipe?.fatG ?? null,
           };
 
   const existing = planEntryId
     ? await prisma.mealLog.findFirst({ where: { userId, planEntryId }, select: { id: true, status: true } })
     : null;
 
-  const data = { date: toDate(date), mealType: type, status: input.status, note: input.note ?? null, ...values };
+  const data = { date: toDate(date), mealType: type, status: input.status, note: input.note ?? fromRecipe?.name ?? null, ...values };
   const saved = existing
     ? await prisma.mealLog.update({ where: { id: existing.id }, data, select: logSelect })
     : await prisma.mealLog.create({ data: { userId, planEntryId, ...data }, select: logSelect });
@@ -148,6 +162,9 @@ export async function saveMealLog(userId: string, input: MealLogInput) {
     await recordSignal(userId, recipeId, "skip");
   }
   if (input.status === "eaten_as_planned" && existing?.status !== "eaten_as_planned" && recipeId) {
+    await recordSignal(userId, recipeId, "eaten");
+  }
+  if (input.status === "ad_hoc" && fromRecipe && recipeId) {
     await recordSignal(userId, recipeId, "eaten");
   }
   return formatMealLog(saved);

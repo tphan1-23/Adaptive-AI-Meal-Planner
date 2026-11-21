@@ -89,3 +89,16 @@ export type Adherence = {
   totals: AdherenceSummary;
   days: AdherenceDay[];
 };
+
+/** One row of the recipe browser (GET /api/recipes). */
+export type RecipeCard = {
+  id: string;
+  name: string;
+  calories: number;
+  proteinG: number | null;
+  tags: string[];
+  source: string;
+  imageUrl: string | null;
+  isFavorite: boolean;
+};
+export type RecipePage = { recipes: RecipeCard[]; total: number; hasMore: boolean; nextOffset: number };

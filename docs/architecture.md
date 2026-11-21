@@ -13,7 +13,7 @@ The Adaptive AI Meal Planner is a responsive web app that recommends a recipe ea
 | Component | Responsibility |
 | --- | --- |
 | Web app | Next.js / React UI on Vercel: onboarding, daily recipe, recipe detail, shopping list, adherence dashboard. Calls only our API. |
-| Phone app | Expo (React Native) app in `mobile/`: login, onboarding quiz, today (swap, log meals and other food, weigh-in), recipe (equipment conversion, ingredient swap), saved recipes, shopping, progress, settings (profile, password, account deletion). Calls only our API, signing in with the Supabase client and sending its access token as a bearer token. |
+| Phone app | Expo (React Native) app in `mobile/`: login, onboarding quiz, today (swap, log meals and other food, weigh-in), recipe (equipment conversion, ingredient swap), recipes (browse all, search, filter, saved), shopping, progress, settings (profile, password, account deletion). Calls only our API, signing in with the Supabase client and sending its access token as a bearer token. |
 | Dish photos | Recipes are matched to a well-known dish by name and get a free Wikimedia Commons photo. Addresses are stored in the repo (`src/server/recipes/dish-photos.json`); no outside request at runtime. |
 | Backend API + Auth | Next.js API routes. Validates input, verifies the user on every request, returns only that user's data. The single security checkpoint. |
 | Profile and calorie engine | Daily target from height, weight, age, sex, activity (Mifflin-St Jeor). Nudged by a small step after weekly weigh-ins, never below a safety floor. |
@@ -106,6 +106,7 @@ All routes need a logged-in user (401 otherwise) and only ever touch that user's
 | `POST /api/meal-logs` | `{ entryId?, status, calories?, proteinG?, carbsG?, fatG?, note?, date?, mealType? }` | `{ log }`: what was actually eaten (`eaten_as_planned`, `modified`, `skipped`, `ad_hoc`). Logging a planned meal again updates it; skipping teaches the preference model. `GET` (with `from`/`to`) lists logs, `DELETE { id }` undoes one |
 | `GET /api/adherence` | `from?`, `to?` | `{ totals, days, weeks, adherenceVsWeight }`: planned versus actual for the dashboard charts, per day and per week, with the weekly average weight and how closely following the plan relates to weight change |
 | `GET /api/entries/:id` | | `{ entry, recipe, convertedSteps, convertedForEquipment, modifiedRecipe }`: everything the recipe page needs |
+| `GET /api/recipes` | `q?`, `mealType?`, `minCalories?`, `maxCalories?`, `sort?`, `saved?`, `offset?`, `limit?` | `{ recipes, total, hasMore, nextOffset }`: every recipe that is safe for the user, one page at a time |
 | `GET /api/recipes/:id` | | `{ recipe }` with ingredients, steps and macros |
 
 `quality` is `close` or `rough`: show rough swaps as a weaker suggestion. `grams` keeps the calories the same. `amountAssumed` is true when the recipe has no gram amount, so 100 g was assumed. `note` is a ready-to-show sentence.

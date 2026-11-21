@@ -172,7 +172,7 @@ export function BottomNav() {
     { href: "/today", label: "Today", icon: <TodayIcon /> },
     { href: "/shopping-list", label: "Shopping", icon: <BagIcon /> },
     { href: "/dashboard", label: "Progress", icon: <TrendIcon /> },
-    { href: "/saved", label: "Saved", icon: <HeartIcon /> },
+    { href: "/saved", label: "Recipes", icon: <HeartIcon /> },
     { href: "/settings", label: "Settings", icon: <UserIcon /> },
   ];
   return (

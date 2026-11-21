@@ -6,6 +6,7 @@ import { api, ApiError } from "@/lib/api";
 import { cap } from "@/lib/vocab";
 import BowlArt from "@/components/BowlArt";
 import Sheet from "@/components/Sheet";
+import { EatRecipeSheet } from "@/components/MealSheets";
 import { Button, ErrorText, Spinner, cx } from "@/components/ui";
 
 type Recipe = {
@@ -29,10 +30,12 @@ export default function SavedRecipePage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [recipe, setRecipe] = useState<Recipe | null>(null);
-  const [favorite, setFavorite] = useState(true);
+  const [favorite, setFavorite] = useState(false);
   const [tab, setTab] = useState<"ingr" | "method">("ingr");
   const [error, setError] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
+  const [eating, setEating] = useState(false);
+  const [logged, setLogged] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -98,7 +101,11 @@ export default function SavedRecipePage() {
             {stat("Carbs", recipe.carbsG)}
             {stat("Fat", recipe.fatG)}
           </div>
-          <Button onClick={() => setPicking(true)}>Use on a day</Button>
+          <div className="flex flex-col gap-2.5">
+            <Button onClick={() => setPicking(true)}>Use on a day</Button>
+            <Button variant="outline" onClick={() => setEating(true)}>I ate this</Button>
+            {logged && <p className="text-[13px]" style={{ color: "#15803D" }}>Logged. It counts toward your calories.</p>}
+          </div>
           <div role="tablist" className="flex rounded-[14px] p-1" style={{ backgroundColor: "#F3F3F1" }}>
             {(["ingr", "method"] as const).map((t) => (
               <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={cx("h-11 flex-1 rounded-[11px] text-[15px]", tab === t ? "bg-white font-semibold text-ink" : "font-medium text-ink-muted")}>
@@ -125,6 +132,7 @@ export default function SavedRecipePage() {
           )}
         </>
       )}
+      {eating && recipe && <EatRecipeSheet recipeId={recipe.id} name={recipe.name} calories={recipe.calories} onClose={() => setEating(false)} onSaved={() => { setEating(false); setLogged(true); }} />}
       {picking && recipe && <DaySheet recipeId={recipe.id} onClose={() => setPicking(false)} />}
     </main>
   );

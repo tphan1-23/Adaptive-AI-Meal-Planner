@@ -150,6 +150,16 @@ Note: Food.com ingredients have **no real quantities** (`quantity: 1, unit: "ite
 `isFavorite` says whether the user saved the recipe (see [Favorites](#favorites)). `convertedForEquipment` lists the
 appliances the converted steps were written for.
 
+### `GET /api/recipes?q=&mealType=&minCalories=&maxCalories=&sort=&saved=&offset=&limit=`
+Browse every recipe that is safe for the user, one page at a time. All parameters are optional:
+`q` (search words in the name or tags), `mealType` (`breakfast`, `lunch`, `dinner`, `snack`), `minCalories`, `maxCalories`,
+`sort` (`for-you` is the default: calorie fit for the meal plus learned tastes; `name`; `calories` lightest first),
+`saved=true` (only the user's saved recipes), `offset` and `limit` (1-30, default 20). Returns
+`{ "recipes": [{ id, name, calories, proteinG, tags, source, imageUrl, isFavorite }], "total", "hasMore", "nextOffset" }`.
+Recipes with the user's allergens or outside their diet are never listed (checked in SQL, in code, and on the real ingredient
+names of each page). No AI is used. Open one with `GET /api/recipes/:id`; put it on a day with `POST /api/swap { entryId, recipeId }`;
+log it as eaten with `POST /api/meal-logs { status: "ad_hoc", recipeId }`.
+
 ### `GET /api/recipes/:id`
 `{ "recipe": { … } }` (same recipe shape, with `imageUrl` and `isFavorite`). Shared recipes and the user's own AI recipes only, otherwise `404`.
 Use it for a saved recipe that is not a plan entry.
@@ -201,11 +211,11 @@ AI budget). Every option already passed the diet, allergy and ingredient checks.
 `{ "entryId": "…", "request": "something with chicken", "recipeId": "…" }` replaces that meal with another that fits the user. Clears
 any conversion or modification and teaches the preference model.
 
-`recipeId` (optional) is a choice from `/api/swap/options`, or one of the user's **saved recipes**. That exact recipe is used, with no
-AI call. A choice from the options must still be in the user's safe pool. A saved recipe is allowed even if it is not among the
-top options, but only after the same allergy, diet and real-ingredient checks; a saved recipe that is not safe for the user is
-refused. Either way the answer is `422` when it can't be used. Without `recipeId`, the AI (or the top-ranked recipe) chooses.
-This is how a saved recipe is put on a day: `POST /api/swap { entryId, recipeId }`.
+`recipeId` (optional) is a choice from `/api/swap/options`, or any recipe the user picked (a saved one or one found with
+`GET /api/recipes`). That exact recipe is used, with no AI call. A recipe outside the top options is allowed, but only after the
+same allergy, diet and real-ingredient checks as everything else; one that is not safe for the user is refused. Either way the
+answer is `422` when it can't be used. Without `recipeId`, the AI (or the top-ranked recipe) chooses.
+This is how a saved or browsed recipe is put on a day: `POST /api/swap { entryId, recipeId }`.
 
 `request` is optional plain text up to 200 characters, such as `"something with chicken"`, `"Thai noodles"` or
 `"lighter, no onions"`. Words after "no", "without" or "avoid" are things to leave out. The new recipe is chosen from
@@ -263,7 +273,9 @@ Build a brand-new AI recipe from the user's tastes. Body (all optional):
 `{ "wish": "something spicy with noodles", "date": "2026-11-18", "mealType": "dinner" }`.
 Nutrition is computed from ingredient data, not by the AI. The recipe is private to the user. With `date`, it is also
 added to that day as an extra. Returns `{ "recipe": { … }, "entry": { … } | null }`.
-`422` if the result fails validation (retry), `429` at the daily limit.
+The AI only proposes ingredients and grams; the server matches every ingredient to the nutrition table, scales the portion in code to
+the meal's calorie target when the AI's portion is too big or small, and tries up to 3 times (telling the AI which names could not
+be matched) before giving up. `422` if every try fails validation (retry), `429` at the daily limit.
 
 ---
 
@@ -311,7 +323,11 @@ Record a meal. `status` decides what else is needed:
 | `eaten_as_planned` | `entryId` | the planned meal's (the modified recipe's calories if the user changed it) |
 | `skipped` | `entryId` | 0 |
 | `modified` | `entryId`, `calories` | what the user sends |
-| `ad_hoc` (not in the plan) | `calories`; `date` and `mealType` default to today and dinner; no `entryId` | what the user sends |
+| `ad_hoc` (not in the plan) | `calories` **or** `recipeId`; `date` and `mealType` default to today and dinner; no `entryId` | what the user sends, else the recipe's |
+
+`recipeId` (only with `ad_hoc`) logs a recipe the user ate outside the plan, for example one found with `GET /api/recipes`: its calories and
+macros fill in what is not sent, its name becomes the `note`, and it records one positive `eaten` taste signal. `404` if the recipe is
+not visible to the user; `400` if `recipeId` is sent with another status.
 
 Optional on any: `proteinG`, `carbsG`, `fatG`, `note` (up to 300 characters). `calories` is 0-5000. For a planned meal the
 date and meal type come from the plan entry. A meal cannot be logged for a day after tomorrow.
@@ -413,6 +429,8 @@ ad-hoc foods the user logged, ingredient-level likes or dislikes, and anything a
 `calories` (skipped meals count 0) against the target gives "eaten so far".
 
 **Saved recipes:** `POST /api/favorites` when the heart is tapped, `GET /api/favorites` for the list, `GET /api/recipes/:id` to open one.
+
+**Browsing all recipes:** `GET /api/recipes` for the searchable list, `GET /api/recipes/:id` to open one, then `POST /api/swap { entryId, recipeId }` to put it on a day or `POST /api/meal-logs { status: "ad_hoc", recipeId }` to log it as eaten.
 
 ---
 

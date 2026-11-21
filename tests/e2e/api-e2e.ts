@@ -190,7 +190,35 @@ async function main() {
       const refused = await call("/api/swap", { json: { entryId: entries[6].id, recipeId: unsafe.id } });
       check("a saved recipe with a peanut allergen is refused for a peanut-allergic user (422)", refused.status === 422, `status ${refused.status}`);
     }
-    check("an unsaved recipe outside the options is refused (422)", (await call("/api/swap", { json: { entryId: entries[6].id, recipeId: (await prisma.recipe.findFirst({ where: { ownerId: null, id: { notIn: [goodId, unsafe?.id ?? ""] } }, select: { id: true } }))!.id } })).status === 422);
+    check("a recipe id that does not exist is refused (422)", (await call("/api/swap", { json: { entryId: entries[6].id, recipeId: "no-such-recipe" } })).status === 422);
+
+    console.log("\n9f. Browse all recipes, then swap or log one");
+    const list = await call("/api/recipes");
+    check("the recipe list answers 200 with recipes and a total", list.status === 200 && list.body?.recipes?.length > 0 && list.body?.total > 0, `status ${list.status}`);
+    const listedIds: string[] = (list.body?.recipes ?? []).map((r: { id: string }) => r.id);
+    const listedPeanut = await prisma.recipe.count({ where: { id: { in: listedIds }, allergens: { has: "peanut" } } });
+    check("nothing with a peanut allergen is listed for a peanut-allergic user", listedPeanut === 0, `${listedPeanut} found`);
+    const page2 = await call("/api/recipes?offset=20&limit=20");
+    check("the next page has different recipes", page2.status === 200 && page2.body.recipes.length > 0 && page2.body.recipes.every((r: { id: string }) => !listedIds.includes(r.id)));
+    const search = await call("/api/recipes?q=chicken&sort=name");
+    check("searching finds recipes about chicken", search.status === 200 && search.body.recipes.length > 0 && search.body.recipes.every((r: { name: string; tags: string[] }) => /chicken/i.test(r.name) || r.tags.includes("chicken")));
+    const low = await call("/api/recipes?sort=calories&mealType=dinner&limit=10");
+    const cals: number[] = (low.body?.recipes ?? []).map((r: { calories: number }) => r.calories);
+    check("sorting by calories goes up", cals.length > 1 && cals.every((c, i) => i === 0 || c >= cals[i - 1]));
+    check("a calorie range is respected", (await call("/api/recipes?minCalories=300&maxCalories=500&limit=30")).body.recipes.every((r: { calories: number }) => r.calories >= 300 && r.calories <= 500));
+    const mine = await call("/api/recipes?saved=true");
+    check("the saved filter lists saved recipes only", mine.status === 200 && mine.body.recipes.some((r: { id: string }) => r.id === goodId) && mine.body.recipes.every((r: { isFavorite: boolean }) => r.isFavorite));
+    check("a bad filter is rejected (400)", (await call("/api/recipes?mealType=brunch")).status === 400);
+    check("no token -> 401", (await call("/api/recipes", { auth: false })).status === 401);
+    const picked = list.body.recipes[0];
+    const swapIt = await call("/api/swap", { json: { entryId: entries[2].id, recipeId: picked.id } });
+    check("a browsed recipe can replace a day's meal", swapIt.status === 200 && swapIt.body?.entry?.recipe?.id === picked.id, `status ${swapIt.status} ${swapIt.body?.error ?? ""}`);
+    const ateBefore = await prisma.userRecipeSignal.count({ where: { userId: userId!, type: "eaten" } });
+    const logIt = await call("/api/meal-logs", { json: { status: "ad_hoc", recipeId: picked.id, mealType: "lunch" } });
+    check("a browsed recipe can be logged as eaten, taking its calories and name", logIt.status === 201 && Math.round(logIt.body?.log?.calories) === Math.round(picked.calories) && logIt.body?.log?.note === picked.name, `status ${logIt.status}`);
+    check("and it teaches the planner (one positive signal)", (await prisma.userRecipeSignal.count({ where: { userId: userId!, type: "eaten" } })) === ateBefore + 1);
+    check("a recipe id on a planned-meal log is rejected (400)", (await call("/api/meal-logs", { json: { entryId: entries[4].id, status: "eaten_as_planned", recipeId: picked.id } })).status === 400);
+    check("logging a recipe that does not exist is 404", (await call("/api/meal-logs", { json: { status: "ad_hoc", recipeId: "no-such-recipe" } })).status === 404);
 
     console.log("\n9e. Change a recipe in words, and create one (AI)");
     const mod = await call("/api/modify", { json: { entryId: entries[3].id, request: "use less salt" } });

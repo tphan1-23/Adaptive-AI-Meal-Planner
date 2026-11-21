@@ -140,6 +140,14 @@ email-confirmation settings are switched on.
 - Use `recipe.imageUrl` when it is not `null`; otherwise draw an illustration. If the image fails to load, fall back to the illustration too.
 - Credit Wikimedia Commons somewhere visible (settings or about).
 
+### Recipes (browse all, and saved)
+- The Recipes tab (route `/saved`) is the browser: a switch between **All recipes** and **Saved** (`saved=true`), a search box (`q`, send it after a short
+  pause in typing), meal chips (`mealType`), sort chips (`sort`), and "Show more" (`offset` = how many are already shown). Ignore answers from an older search.
+- The list only has safe recipes, so there is nothing to warn about; if a search finds nothing, say that allergens are never listed.
+- Tapping a row opens the recipe (`GET /api/recipes/:id`, route `/recipes/saved/<id>` on the phone, `/saved/<id>` on the web) with two actions:
+  **Use on a day** (pick a day, `POST /api/swap { entryId, recipeId }`, `422` = does not fit allergies or diet) and **I ate this**
+  (`POST /api/meal-logs { status: "ad_hoc", recipeId, date, mealType }`, then the "How was it?" step).
+
 ### Saved recipes
 - The heart calls `POST /api/favorites { recipeId }` / `DELETE /api/favorites { recipeId }`; start it filled when `recipe.isFavorite` is true.
 - The saved list is `GET /api/favorites`; open one with `GET /api/recipes/:id` (it is a recipe, not a plan entry).

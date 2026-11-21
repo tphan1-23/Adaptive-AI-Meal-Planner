@@ -19,7 +19,7 @@ import { isFavorite } from "../favorites/service";
 import { photoFor } from "../recipes/dish-photos";
 
 /** Columns the planner needs. No steps or ingredients, which keeps candidate loads light. */
-const RECIPE_SELECT = {
+export const RECIPE_SELECT = {
   id: true, name: true, calories: true, proteinG: true, carbsG: true, fatG: true,
   tags: true, equipment: true, allergens: true, diets: true,
 } as const;
@@ -245,7 +245,7 @@ async function shortlistFor(
  * a recipe is dropped when any ingredient name triggers one of the user's allergens, breaks their
  * diet, or mentions a word they asked to avoid.
  */
-async function dropUnsafeByIngredients(
+export async function dropUnsafeByIngredients(
   ranked: RecipeLite[],
   profile: { allergies: string[]; diet?: string | null },
   wish: ParsedWish | null,
@@ -403,12 +403,11 @@ export async function recommendForDay(
 const SWAP_OPTIONS = 3;
 
 /**
- * One of the user's saved recipes, if (and only if) it is safe for them: it passes the allergy and diet filters and the
- * check on its real ingredient names. Returns null when it is not saved, not visible to the user, or not safe.
+ * Any recipe the user can see (a shared one or their own), if (and only if) it is safe for them: it passes the allergy
+ * and diet filters and the check on its real ingredient names. Used when the user picks a recipe themselves, from their
+ * saved list or from browsing. Returns null when it is not visible to the user or not safe.
  */
-async function safeSavedRecipe(userId: string, recipeId: string, ctx: UserPlanningContext): Promise<RecipeLite | null> {
-  const saved = await prisma.favoriteRecipe.findUnique({ where: { userId_recipeId: { userId, recipeId } }, select: { id: true } });
-  if (!saved) return null;
+async function safeVisibleRecipe(userId: string, recipeId: string, ctx: UserPlanningContext): Promise<RecipeLite | null> {
   const row = await prisma.recipe.findFirst({ where: { id: recipeId, OR: [{ ownerId: null }, { ownerId: userId }] }, select: RECIPE_SELECT });
   if (!row) return null;
   const passed = filterRecipes([row as RecipeLite], ctx);
@@ -488,9 +487,9 @@ export async function swapEntry(userId: string, entryId: string, request?: strin
 
   let choice: Choice;
   if (recipeId) {
-    // A choice from the swap options, or one of the user's saved recipes. A saved recipe is allowed even if it is
+    // A choice from the swap options, or any recipe the user picked (saved or browsed). It is allowed even if it is
     // not among the top options, but only after the same allergy, diet and ingredient checks as everything else.
-    const picked = shortlist.find((r) => r.id === recipeId) ?? (await safeSavedRecipe(userId, recipeId, ctx));
+    const picked = shortlist.find((r) => r.id === recipeId) ?? (await safeVisibleRecipe(userId, recipeId, ctx));
     if (!picked) throw new HttpError(422, "That recipe is not available for you as a swap. Pick another.");
     choice = { recipeId: picked.id, reason: "You chose this one.", fromAi: false };
   } else {

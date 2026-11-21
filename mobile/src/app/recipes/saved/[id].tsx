@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import BowlArt from "@/components/BowlArt";
+import { EatRecipeSheet } from "@/components/MealSheets";
 import { Button, ErrorText, Muted, Page, Sheet, Spinner } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { c } from "@/lib/theme";
@@ -28,10 +29,12 @@ const qty = (i: Recipe["ingredients"][number]) => (i.unit === "item" ? "" : `${+
 export default function SavedRecipe() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [recipe, setRecipe] = useState<Recipe | null>(null);
-  const [favorite, setFavorite] = useState(true);
+  const [favorite, setFavorite] = useState(false);
   const [tab, setTab] = useState<"ingr" | "method">("ingr");
   const [error, setError] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
+  const [eating, setEating] = useState(false);
+  const [logged, setLogged] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -99,7 +102,11 @@ export default function SavedRecipe() {
             {stat("Carbs", recipe.carbsG)}
             {stat("Fat", recipe.fatG)}
           </View>
-          <Button title="Use on a day" onPress={() => setPicking(true)} />
+          <View style={{ gap: 10 }}>
+            <Button title="Use on a day" onPress={() => setPicking(true)} />
+            <Button title="I ate this" variant="outline" onPress={() => setEating(true)} />
+            {logged && <Text style={{ color: c.ok, fontSize: 13 }}>Logged. It counts toward your calories.</Text>}
+          </View>
           <View style={{ flexDirection: "row", backgroundColor: c.chip, borderRadius: 14, padding: 4 }} accessibilityRole="tablist">
             {(["ingr", "method"] as const).map((t) => (
               <Pressable key={t} accessibilityRole="tab" accessibilityState={{ selected: tab === t }} onPress={() => setTab(t)} style={{ flex: 1, height: 44, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: tab === t ? c.white : "transparent" }}>
@@ -129,6 +136,7 @@ export default function SavedRecipe() {
           )}
         </>
       )}
+      {eating && recipe && <EatRecipeSheet recipeId={recipe.id} name={recipe.name} calories={recipe.calories} onClose={() => setEating(false)} onSaved={() => { setEating(false); setLogged(true); }} />}
       {picking && recipe && <DaySheet recipeId={recipe.id} onClose={() => setPicking(false)} />}
     </Page>
   );
