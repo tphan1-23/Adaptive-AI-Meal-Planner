@@ -1,31 +1,30 @@
 {
-    "expo":  {
-                 "name":  "Meal Planner",
-                 "slug":  "adaptive-ai-meal-planner",
-                 "version":  "1.0.0",
-                 "orientation":  "portrait",
-                 "icon":  "./assets/icon.png",
-                 "userInterfaceStyle":  "light",
-                 "ios":  {
-                             "supportsTablet":  true,
-                             "bundleIdentifier":  "edu.uca.mealplanner"
-                         },
-                 "android":  {
-                                 "adaptiveIcon":  {
-                                                      "backgroundColor":  "#E6F4FE",
-                                                      "foregroundImage":  "./assets/android-icon-foreground.png",
-                                                      "backgroundImage":  "./assets/android-icon-background.png",
-                                                      "monochromeImage":  "./assets/android-icon-monochrome.png"
-                                                  },
-                                 "predictiveBackGestureEnabled":  false,
-                                 "package":  "edu.uca.mealplanner"
-                             },
-                 "web":  {
-                             "favicon":  "./assets/favicon.png"
-                         },
-                 "plugins":  [
-                                 "expo-router"
-                             ],
-                 "scheme":  "mealplanner"
-             }
+  "expo": {
+    "name": "Forkcast",
+    "slug": "adaptive-ai-meal-planner",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "edu.uca.mealplanner"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#D92D20",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "edu.uca.mealplanner"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "scheme": "mealplanner"
+  }
 }

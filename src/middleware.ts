@@ -66,6 +66,6 @@ export const config = {
   // API routes (header checks only), and every page except Next internals and static files.
   matcher: [
     "/api/:path*",
-    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!api|_next/static|_next/image|favicon.ico|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

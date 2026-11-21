@@ -16,3 +16,32 @@ input[type="number"]::-webkit-inner-spin-button {
 input[type="number"] {
   -moz-appearance: textfield;
 }
+
+/* App-like feel when opened from the home screen. */
+html {
+  -webkit-text-size-adjust: 100%;
+  /* No rubber-band bounce that drags the whole page away from the bars. */
+  overscroll-behavior-y: none;
+}
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+a,
+button,
+[role="button"] {
+  touch-action: manipulation; /* no double-tap zoom delay */
+}
+button,
+nav,
+.select-none-ui {
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+/* iPhone zooms into any field smaller than 16px when it is tapped. */
+@media (max-width: 768px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}

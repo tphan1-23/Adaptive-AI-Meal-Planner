@@ -197,3 +197,11 @@ email-confirmation settings are switched on.
 - Do not store the user's allergies or diet in the browser. Read them from `/api/profile`.
 - Add any new private page to `PROTECTED_PAGES` in `src/server/auth/routes.ts`.
 - Meals can only be logged up to tomorrow (`400` otherwise), so do not offer a log button on days far in the future.
+
+## Install on a phone (home-screen app)
+The web app is installable. The name and tagline live in `src/lib/brand.ts` (the phone app's name is in `mobile/app.json`), the icon source is `assets/brand/icon.svg`, and the manifest is `src/app/manifest.ts`.
+- **iPhone:** open the site in **Safari** (other browsers on iPhone cannot install it), tap Share, then **Add to Home Screen**. It opens full screen with no address bar or toolbar. Sign in once inside the installed app: it keeps its own storage, separate from Safari.
+- **Android (Chrome):** menu, then **Install app** (or Add to Home screen).
+- What makes it work: `appleWebApp.capable` and `display: "standalone"`, `viewportFit: "cover"` with the bottom bar padded by `env(safe-area-inset-bottom)`, no zoom on tapped fields (inputs are 16px on phones, `maximumScale: 1`), and `100dvh` heights.
+- To regenerate the PNG icons after editing the SVG, render it at 180, 192, 512 and 1024 px into `public/icons/` and `mobile/assets/`.
+- iPhone caches the home-screen icon and name when the app is added: after changing either, remove the app from the home screen and add it again.

@@ -17,7 +17,7 @@ export default function Sheet({ title, onClose, children }: { title: string; onC
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="absolute bottom-0 w-full max-w-md rounded-t-[28px] bg-white px-5 pb-9 pt-2.5"
+        className="absolute bottom-0 w-full max-w-md rounded-t-[28px] bg-white px-5 pb-[max(2.25rem,calc(env(safe-area-inset-bottom)+1rem))] pt-2.5"
       >
         <div aria-hidden className="mx-auto mb-4 h-[5px] w-10 rounded-full bg-line" />
         <div className="mb-1 flex items-center justify-between">

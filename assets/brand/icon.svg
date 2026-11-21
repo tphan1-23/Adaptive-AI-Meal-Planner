@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#EC4A3B"/>
+      <stop offset="1" stop-color="#B42318"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <g id="mark">
+    <circle cx="512" cy="548" r="318" fill="#FFFFFF"/>
+    <circle cx="512" cy="548" r="262" fill="none" stroke="#F6D6D2" stroke-width="12"/>
+    <g fill="#D92D20">
+      <rect x="446" y="376" width="30" height="150" rx="15"/>
+      <rect x="497" y="376" width="30" height="150" rx="15"/>
+      <rect x="548" y="376" width="30" height="150" rx="15"/>
+      <rect x="446" y="470" width="132" height="86" rx="43"/>
+      <rect x="490" y="520" width="44" height="210" rx="22"/>
+    </g>
+    <path fill="#FFFFFF" d="M800 150 C808 222 826 240 898 248 C826 256 808 274 800 346 C792 274 774 256 702 248 C774 240 792 222 800 150Z"/>
+    <path fill="#FFFFFF" opacity="0.85" d="M232 214 C236 250 246 260 282 264 C246 268 236 278 232 314 C228 278 218 268 182 264 C218 260 228 250 232 214Z"/>
+  </g>
+</svg>
