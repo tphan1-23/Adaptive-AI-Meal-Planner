@@ -2,6 +2,8 @@
 export type EntryRecipe = {
   id: string;
   name: string;
+  /** "dataset" for Food.com recipes, "ai" for a recipe the AI made for this user. */
+  source: string;
   calories: number;
   proteinG: number | null;
   carbsG: number | null;

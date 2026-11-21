@@ -1,18 +1,27 @@
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
-import { Button, ErrorText, H1, H2, Muted, Page, Spinner } from "@/components/ui";
+import { Button, ErrorText, H1, H2, Muted, Page, Segmented, Spinner } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { parseDay } from "@/lib/dates";
 import { c } from "@/lib/theme";
+import { cap } from "@/lib/vocab";
 
-type Item = { id: string; name: string; quantity: number; unit: string; checked: boolean; mealCount: number };
+type Aisle = "produce" | "meat" | "seafood" | "dairy" | "bakery" | "frozen" | "pantry" | "spices" | "other";
+type UsedIn = { mealId: string; recipe: string; date: string };
+type Item = { id: string; name: string; quantity: number; unit: string; checked: boolean; mealCount: number; aisle: Aisle; staple: boolean; usedIn: UsedIn[] };
 type List = { planId: string; weekStart: string; items: Item[] };
 
-const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-// Dataset amounts are placeholders ("3 item"), so only show a count when it's more than 1.
-const amount = (i: Item) => (i.unit === "item" ? (i.quantity > 1 ? `×${i.quantity}` : "") : `${+i.quantity.toFixed(2)} ${i.unit}`);
+const AISLES: { key: Aisle; label: string }[] = [
+  { key: "produce", label: "Produce" }, { key: "meat", label: "Meat" }, { key: "seafood", label: "Seafood" },
+  { key: "dairy", label: "Dairy and eggs" }, { key: "bakery", label: "Bakery" }, { key: "frozen", label: "Frozen" },
+  { key: "pantry", label: "Pantry" }, { key: "spices", label: "Spices" }, { key: "other", label: "Other" },
+];
+
+// Dataset amounts are placeholders ("3 item"), so only real units are shown.
+const amount = (i: Item) => (i.unit === "item" ? "" : `${+i.quantity.toFixed(2)} ${i.unit}`);
+const usedText = (i: Item) => (i.usedIn.length === 0 ? "" : i.usedIn.length === 1 ? i.usedIn[0].recipe : `${i.usedIn.length} meals`);
 
 function weekLabel(value: string) {
   const start = parseDay(value);
@@ -32,6 +41,8 @@ export default function Shopping() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [planning, setPlanning] = useState(false);
+  const [view, setView] = useState<"aisle" | "recipe">("aisle");
+  const [basicsOpen, setBasicsOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -76,23 +87,45 @@ export default function Shopping() {
     }
   }
 
-  const toBuy = list?.items.filter((i) => !i.checked) ?? [];
-  const got = list?.items.filter((i) => i.checked) ?? [];
+  const { buy, basics } = useMemo(() => {
+    const items = list?.items ?? [];
+    return { buy: items.filter((i) => !i.staple), basics: items.filter((i) => i.staple) };
+  }, [list]);
+  const left = buy.filter((i) => !i.checked).length;
+
+  // "By recipe": each meal with the items it needs (pantry basics are listed separately).
+  const meals = useMemo(() => {
+    const map = new Map<string, { mealId: string; recipe: string; date: string; items: Item[] }>();
+    for (const item of buy) {
+      for (const u of item.usedIn) {
+        const m = map.get(u.mealId) ?? { mealId: u.mealId, recipe: u.recipe, date: u.date, items: [] };
+        m.items.push(item);
+        map.set(u.mealId, m);
+      }
+    }
+    return [...map.values()].sort((a, b) => a.date.localeCompare(b.date));
+  }, [buy]);
 
   async function copy() {
-    await Clipboard.setStringAsync(toBuy.map((i) => `• ${cap(i.name)}${amount(i) ? ` ${amount(i)}` : ""}`).join("\n"));
+    const lines: string[] = [];
+    for (const a of AISLES) {
+      const rows = buy.filter((i) => i.aisle === a.key && !i.checked);
+      if (!rows.length) continue;
+      lines.push(a.label.toUpperCase(), ...rows.map((i) => `• ${cap(i.name)}${amount(i) ? ` ${amount(i)}` : ""}`), "");
+    }
+    await Clipboard.setStringAsync(lines.join("\n").trim());
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
 
-  const row = (i: Item) => (
-    <Pressable key={i.id} accessibilityRole="checkbox" accessibilityState={{ checked: i.checked }} onPress={() => toggle(i)} style={{ flexDirection: "row", alignItems: "center", gap: 16, paddingVertical: 14, borderTopWidth: 1, borderTopColor: c.line, minHeight: 56 }}>
+  const row = (i: Item, key?: string, sub?: string) => (
+    <Pressable key={key ?? i.id} accessibilityRole="checkbox" accessibilityState={{ checked: i.checked }} onPress={() => toggle(i)} style={{ flexDirection: "row", alignItems: "center", gap: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: c.line, minHeight: 56 }}>
       <View style={{ width: 26, height: 26, borderRadius: 13, borderWidth: 1.5, borderColor: i.checked ? c.brand : "#C9C9C5", backgroundColor: i.checked ? c.brand : c.white, alignItems: "center", justifyContent: "center" }}>
         {i.checked && <Text style={{ color: c.white, fontWeight: "600", fontSize: 13 }}>✓</Text>}
       </View>
       <View style={{ flex: 1 }}>
         <Text style={{ fontSize: 16, fontWeight: "500", color: i.checked ? c.muted : c.ink, textDecorationLine: i.checked ? "line-through" : "none" }}>{cap(i.name)}</Text>
-        <Text style={{ fontSize: 12, color: c.muted, marginTop: 2 }}>Used in {i.mealCount} {i.mealCount === 1 ? "meal" : "meals"}</Text>
+        {(sub ?? usedText(i)) ? <Text numberOfLines={1} style={{ fontSize: 12, color: c.muted, marginTop: 2 }}>{sub ?? usedText(i)}</Text> : null}
       </View>
       <Text style={{ fontSize: 15, fontWeight: "500" }}>{amount(i)}</Text>
     </Pressable>
@@ -103,9 +136,9 @@ export default function Shopping() {
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", gap: 12 }}>
         <View style={{ flex: 1 }}>
           <H1>Shopping</H1>
-          {state === "ready" && list && <Muted>{toBuy.length} to buy{weekLabel(list.weekStart) ? ` · ${weekLabel(list.weekStart)}` : ""}</Muted>}
+          {state === "ready" && list && <Muted>{left} to buy{weekLabel(list.weekStart) ? ` · ${weekLabel(list.weekStart)}` : ""}</Muted>}
         </View>
-        {state === "ready" && toBuy.length > 0 && <Button title={copied ? "Copied ✓" : "Copy"} variant="outline" onPress={copy} style={{ minHeight: 40, paddingHorizontal: 18 }} />}
+        {state === "ready" && left > 0 && <Button title={copied ? "Copied ✓" : "Copy"} variant="outline" onPress={copy} style={{ minHeight: 40, paddingHorizontal: 18 }} />}
       </View>
 
       {state === "loading" && <View style={{ paddingVertical: 60 }}><Spinner /></View>}
@@ -123,11 +156,46 @@ export default function Shopping() {
         </View>
       )}
       {state === "ready" && list && list.items.length === 0 && <Muted style={{ textAlign: "center", paddingVertical: 48 }}>Nothing to buy for this week.</Muted>}
+
       {state === "ready" && list && list.items.length > 0 && (
         <>
-          {toBuy.length > 0 && <View><H2>To buy</H2>{toBuy.map(row)}</View>}
-          {got.length > 0 && <View><H2>Got it</H2>{got.map(row)}</View>}
-          <Muted style={{ fontSize: 12, lineHeight: 19 }}>Matching ingredients are merged. Quantities are added up in code, not estimated by the AI.</Muted>
+          <Segmented<"aisle" | "recipe"> height={44} options={[{ value: "aisle", label: "By aisle" }, { value: "recipe", label: "By recipe" }]} value={view} onChange={setView} />
+
+          {view === "aisle" &&
+            AISLES.map((a) => {
+              const rows = buy.filter((i) => i.aisle === a.key);
+              if (!rows.length) return null;
+              const remaining = rows.filter((i) => !i.checked).length;
+              return (
+                <View key={a.key}>
+                  <H2>{a.label} <Text style={{ color: c.muted, fontWeight: "400", fontSize: 14 }}>· {remaining}</Text></H2>
+                  {[...rows.filter((i) => !i.checked), ...rows.filter((i) => i.checked)].map((i) => row(i))}
+                </View>
+              );
+            })}
+
+          {view === "recipe" &&
+            meals.map((m) => (
+              <View key={m.mealId}>
+                <H2>{m.date ? `${parseDay(m.date).toLocaleDateString(undefined, { weekday: "long" })}: ` : ""}{m.recipe}</H2>
+                {m.items.map((i) => row(i, `${m.mealId}-${i.id}`, i.usedIn.length > 1 ? `also in ${i.usedIn.length - 1} other meal${i.usedIn.length > 2 ? "s" : ""}` : ""))}
+              </View>
+            ))}
+
+          {basics.length > 0 && (
+            <View>
+              <Pressable accessibilityRole="button" accessibilityState={{ expanded: basicsOpen }} onPress={() => setBasicsOpen(!basicsOpen)} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 48, borderTopWidth: 1, borderTopColor: c.line }}>
+                <View>
+                  <Text style={{ fontSize: 17, fontWeight: "600" }}>Pantry basics</Text>
+                  <Muted style={{ fontSize: 13 }}>You probably have these: {basics.map((b) => cap(b.name)).join(", ")}</Muted>
+                </View>
+                <Text style={{ color: c.brand, fontWeight: "600" }}>{basicsOpen ? "Hide" : "Check"}</Text>
+              </Pressable>
+              {basicsOpen && basics.map((i) => row(i))}
+            </View>
+          )}
+
+          <Muted style={{ fontSize: 12, lineHeight: 19 }}>Matching ingredients are merged in code (for example "garlic clove" and "garlic"). Quantities are not estimated by the AI.</Muted>
         </>
       )}
     </Page>

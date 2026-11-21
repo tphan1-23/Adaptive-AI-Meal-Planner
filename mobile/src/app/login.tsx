@@ -64,7 +64,10 @@ export default function Login() {
     setError(null);
     setInfo(null);
     if (!isEmail(email)) return setError("Type your email above first.");
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+    // The reset email links to the web app's set-new-password page when its address is configured
+    // (EXPO_PUBLIC_WEB_URL, which must also be an allowed redirect URL in Supabase).
+    const web = (process.env.EXPO_PUBLIC_WEB_URL ?? "").replace(/\/$/, "");
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), web ? { redirectTo: `${web}/reset-password` } : undefined);
     if (error) setError(error.message);
     else setInfo(`If ${email.trim()} has an account, a reset link is on its way.`);
   }

@@ -3,6 +3,11 @@
 // Food.com ingredients have names only, so dataset recipes carry the placeholder
 // { quantity: 1, unit: "item" }. Summing those gives "how many times you need it".
 // Recipes with real quantities (e.g. AI-modified ones) are summed per unit family.
+// Names are cleaned in tidy.ts so the same product written differently becomes one item.
+
+import { aisleOf, canonicalNames, isStaple, normalizeName, type Aisle } from "./tidy";
+
+export { normalizeName };
 
 export interface IngredientLine {
   name: string;
@@ -13,7 +18,16 @@ export interface IngredientLine {
 export interface MealIngredients {
   /** One planned meal (a PlanEntry). The same recipe on two days is two meals. */
   mealId: string;
+  /** Recipe name and day, so the list can show "used in". */
+  recipe?: string;
+  date?: string;
   ingredients: IngredientLine[];
+}
+
+export interface UsedIn {
+  mealId: string;
+  recipe: string;
+  date: string;
 }
 
 export interface ShoppingItem {
@@ -22,36 +36,12 @@ export interface ShoppingItem {
   unit: string;
   /** In how many planned meals this item appears. */
   mealCount: number;
-}
-
-// ---------- Names ----------
-const DESCRIPTORS = new Set([
-  "fresh", "large", "small", "medium", "chopped", "minced", "diced", "sliced", "shredded",
-  "grated", "melted", "softened", "boneless", "skinless", "cooked", "uncooked", "raw",
-  "finely", "roughly", "coarsely", "thinly", "optional",
-]);
-
-export function normalizeName(raw: string): string {
-  const words = raw
-    .toLowerCase()
-    .replace(/\(.*?\)/g, " ") // drop "(optional)", "(14 oz)"
-    .replace(/[^a-z\s'-]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w && !DESCRIPTORS.has(w));
-  if (!words.length) return raw.trim().toLowerCase();
-  words[words.length - 1] = singular(words[words.length - 1]);
-  return words.join(" ");
-}
-
-const KEEP_AS_IS = new Set(["molasses", "hummus", "couscous", "asparagus", "grits", "swiss", "watercress", "citrus"]);
-
-function singular(w: string): string {
-  if (w.length <= 3 || KEEP_AS_IS.has(w)) return w;
-  if (/(ss|us|is)$/.test(w)) return w; // molasses, hummus, asparagus-like
-  if (w.endsWith("ies")) return w.slice(0, -3) + "y";
-  if (w.endsWith("oes")) return w.slice(0, -2);
-  if (w.endsWith("s")) return w.slice(0, -1);
-  return w;
+  /** Store aisle, for grouping. */
+  aisle: Aisle;
+  /** True for things most kitchens already have (salt, pepper, oil, sugar, flour, water). */
+  staple: boolean;
+  /** The meals that need it. */
+  usedIn: UsedIn[];
 }
 
 // ---------- Units ----------
@@ -75,23 +65,26 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 // ---------- Aggregation ----------
 export function aggregateIngredients(meals: MealIngredients[]): ShoppingItem[] {
-  const map = new Map<string, ShoppingItem & { meals: Set<string> }>();
+  const map = new Map<string, ShoppingItem & { meals: Map<string, UsedIn> }>();
 
   for (const meal of meals) {
     for (const line of meal.ingredients) {
       if (!line?.name || !Number.isFinite(line.quantity) || line.quantity <= 0) continue;
-      const name = normalizeName(line.name);
-      if (!name) continue;
       const { quantity, unit } = normalizeUnit(line.unit, line.quantity);
-      const key = `${name}|${unit}`;
-      const item = map.get(key) ?? { name, quantity: 0, unit, mealCount: 0, meals: new Set<string>() };
-      item.quantity += quantity;
-      item.meals.add(meal.mealId);
-      map.set(key, item);
+      // One line can name two things ("salt and pepper"); each gets the line's quantity.
+      for (const name of canonicalNames(line.name)) {
+        const key = `${name}|${unit}`;
+        const item =
+          map.get(key) ??
+          { name, quantity: 0, unit, mealCount: 0, aisle: aisleOf(name), staple: isStaple(name), usedIn: [], meals: new Map<string, UsedIn>() };
+        item.quantity += quantity;
+        if (!item.meals.has(meal.mealId)) item.meals.set(meal.mealId, { mealId: meal.mealId, recipe: meal.recipe ?? "", date: meal.date ?? "" });
+        map.set(key, item);
+      }
     }
   }
 
   return [...map.values()]
-    .map(({ meals: m, ...item }) => ({ ...item, quantity: round2(item.quantity), mealCount: m.size }))
+    .map(({ meals: m, ...item }) => ({ ...item, quantity: round2(item.quantity), mealCount: m.size, usedIn: [...m.values()] }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }

@@ -149,6 +149,32 @@ email-confirmation settings are switched on.
   `POST /api/convert { entryId, equipment: [...] }`; `convertedForEquipment` says what the shown steps were written for.
   A "not convertible" answer comes back with `available: false`, the original steps and a `note`: show the note.
 
+### Shopping list
+- Show "to buy" as the items with `staple: false` that are not ticked; keep `staple: true` items in a separate "Pantry basics" group.
+- Offer two views: **by aisle** (group by `aisle`, in the order the API returns) and **by recipe** (group items by each `usedIn` meal;
+  an item appears under every meal that needs it, and ticking it ticks it everywhere).
+- Hide `quantity` when `unit` is `"item"` (placeholder); show `usedIn` recipe names or "N meals" as the subtitle.
+
+### Rating after eating (learning)
+- After the user logs a meal as eaten (or changed), ask "How was it?" with three answers: Loved it (`POST /api/signals { recipeId, type: "rating", value: 5 }`),
+  It was fine (send nothing), Not for me (`value: 1`). A failed rating must not block logging. Skips need no question.
+- Show what was learned on Progress: `GET /api/signals` gives `affinity`; list the top positive tags as "You like" and the most negative as "Not your thing".
+
+### Change a recipe in words, and create a recipe (AI)
+- On the recipe page: `POST /api/modify { entryId, request }` (3 to 200 characters), then read the entry again; `modifiedRecipe.request` is what to show
+  ("Your version: ...") with an **Undo** button (`DELETE /api/modify { entryId }`). If `modifiedRecipe.caloriesVerified` is `false`, say the original
+  calories are shown. `422` means the change could not be made safely: ask for different wording.
+- On Today: "Create a recipe" calls `POST /api/generate { wish?, date, mealType: "dinner" }` (5 to 25 seconds) and adds it as an extra meal that day.
+  `429` is the daily limit or the AI limit; `422` means try again. Label recipes with `source: "ai"` as "AI-made".
+
+### Saved recipe on a day
+- From a saved recipe: show the week's days (`GET /api/plan`), then `POST /api/swap { entryId, recipeId }` for the chosen day. `422` means it does not
+  fit the user's allergies or diet, so say so.
+
+### Forgot password
+- `supabase.auth.resetPasswordForEmail(email, { redirectTo: "<web address>/reset-password" })`. That address must be an allowed redirect URL in the
+  Supabase dashboard. The `/reset-password` page (public) lets the user pick a new password with `auth.updateUser`.
+
 ### Settings
 - Edit answers by sending the whole body to `PUT /api/profile`. The calorie target changes only if body, goal or pace changed.
 - Change password in the client with `supabase.auth.updateUser({ password })` after checking the current password with `signInWithPassword`.

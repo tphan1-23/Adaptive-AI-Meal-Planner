@@ -172,9 +172,11 @@ export function BottomNav() {
     { href: "/today", label: "Today", icon: <TodayIcon /> },
     { href: "/shopping-list", label: "Shopping", icon: <BagIcon /> },
     { href: "/dashboard", label: "Progress", icon: <TrendIcon /> },
+    { href: "/saved", label: "Saved", icon: <HeartIcon /> },
+    { href: "/settings", label: "Settings", icon: <UserIcon /> },
   ];
   return (
-    <nav className="sticky bottom-0 z-10 mt-auto grid grid-cols-3 border-t border-line bg-white pb-[env(safe-area-inset-bottom)]">
+    <nav className="sticky bottom-0 z-10 mt-auto grid grid-cols-5 border-t border-line bg-white pb-[env(safe-area-inset-bottom)]">
       {tabs.map((t) => {
         const active = path === t.href || path.startsWith(`${t.href}/`);
         return (
@@ -214,6 +216,21 @@ function BagIcon() {
       <path d="M9 10.5V6a3 3 0 0 1 6 0v4.5" />
       <circle cx="9" cy="10.5" r="0.7" fill="currentColor" />
       <circle cx="15" cy="10.5" r="0.7" fill="currentColor" />
+    </svg>
+  );
+}
+function HeartIcon() {
+  return (
+    <svg {...iconProps}>
+      <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z" />
+    </svg>
+  );
+}
+function UserIcon() {
+  return (
+    <svg {...iconProps}>
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 20c0-3.5 3.1-6 7-6s7 2.5 7 6" />
     </svg>
   );
 }

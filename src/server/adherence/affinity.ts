@@ -5,7 +5,7 @@
 // "course", "cuisine", "time-to-make") or are hard filters rather than tastes ("vegan").
 // Learning from them would be meaningless, so they are ignored.
 
-export type SignalType = "swap_out" | "swap_in" | "rating" | "favorite" | "skip";
+export type SignalType = "swap_out" | "swap_in" | "rating" | "favorite" | "skip" | "eaten";
 
 /** Tags that carry no taste information. */
 const GENERIC_TAGS = new Set([
@@ -53,6 +53,8 @@ export function signalStrength(type: SignalType, value = 1): number {
       return 1;
     case "swap_in":
       return 0.4;
+    case "eaten":
+      return 0.3; // finishing a planned meal is a mild "this worked for me", weaker than choosing or saving one
     case "swap_out":
       return -0.6;
     case "skip":

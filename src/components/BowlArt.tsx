@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { dishKind } from "@/lib/dish-art";
 
 /**
@@ -15,9 +18,10 @@ export default function BowlArt({
   tags?: string[];
   imageUrl?: string | null;
 }) {
-  if (imageUrl) {
+  const [failed, setFailed] = useState(false); // if a photo cannot load, fall back to the illustration
+  if (imageUrl && !failed) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={imageUrl} alt={name ? `Photo of ${name}` : "Photo of the recipe"} className="h-full w-full rounded-[28px] object-cover" />;
+    return <img src={imageUrl} alt={name ? `Photo of ${name}` : "Photo of the recipe"} className="h-full w-full rounded-[28px] object-cover" onError={() => setFailed(true)} />;
   }
   const kind = dishKind(name, tags);
   return (

@@ -107,7 +107,7 @@ export async function modifyEntry(userId: string, entryId: string, request: stri
     where: { id: entry.id },
     // A modified recipe has new steps, so any earlier equipment conversion no longer applies.
     data: { modifiedRecipe: result as unknown as Prisma.InputJsonValue, convertedSteps: [], convertedForEquipment: [] },
-    include: { recipe: { select: { id: true, name: true, calories: true, proteinG: true, carbsG: true, fatG: true, tags: true, equipment: true } } },
+    include: { recipe: { select: { id: true, name: true, source: true, calories: true, proteinG: true, carbsG: true, fatG: true, tags: true, equipment: true } } },
   });
   return { entry: formatEntry(updated), modified: result };
 }
@@ -188,7 +188,7 @@ export async function generateForUser(
         userId, planId: plan.id, recipeId: recipe.id, date, mealType: input.mealType,
         position: taken.length ? Math.max(...taken.map((t) => t.position)) + 1 : 0,
       },
-      include: { recipe: { select: { id: true, name: true, calories: true, proteinG: true, carbsG: true, fatG: true, tags: true, equipment: true } } },
+      include: { recipe: { select: { id: true, name: true, source: true, calories: true, proteinG: true, carbsG: true, fatG: true, tags: true, equipment: true } } },
     });
     entry = formatEntry(created);
   }

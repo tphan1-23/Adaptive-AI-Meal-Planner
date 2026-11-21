@@ -158,6 +158,56 @@ async function main() {
     const afterAge = await call("/api/profile", { method: "PUT", json: { ...body, age: p0.age + 5 } });
     check("changing age recomputes the target", afterAge.status === 200 && afterAge.body?.profile?.calorieTarget !== p0.calorieTarget, `${p0.calorieTarget} -> ${afterAge.body?.profile?.calorieTarget}`);
 
+    console.log("\n9b. Shopping list is tidy");
+    const shop2 = (await call("/api/shopping-list")).body;
+    const shopItems: { name: string; aisle: string; staple: boolean; usedIn: unknown[]; mealCount: number }[] = shop2?.items ?? [];
+    const aisles = ["produce", "meat", "seafood", "dairy", "bakery", "frozen", "pantry", "spices", "other"];
+    check("every item has an aisle, a pantry flag and the meals that use it", shopItems.length > 0 && shopItems.every((i) => aisles.includes(i.aisle) && typeof i.staple === "boolean" && i.usedIn.length === i.mealCount && i.mealCount >= 1));
+    check("no leftover portion words or combined salt and pepper lines", shopItems.every((i) => !/\b(clove|leaves|leaf|halves|half|sprig)\b/.test(i.name) && !/\bsalt and\b/.test(i.name)), shopItems.filter((i) => /\b(clove|leaves|halves|sprig)\b/.test(i.name)).map((i) => i.name).join(","));
+    check("names are unique", new Set(shopItems.map((i) => i.name)).size === shopItems.length || shopItems.length === 0);
+    const longest = shopItems.length;
+    check("list is not bloated (7 dinners, well under 100 items)", longest > 0 && longest < 90, `${longest} items`);
+
+    console.log("\n9c. The planner learns from eating and rating");
+    const eatenBefore = await prisma.userRecipeSignal.count({ where: { userId: userId!, type: "eaten" } });
+    const e4 = await call("/api/meal-logs", { json: { entryId: entries[4].id, status: "eaten_as_planned" } });
+    check("logging a meal as eaten works", e4.status === 201);
+    const eatenAfter = await prisma.userRecipeSignal.count({ where: { userId: userId!, type: "eaten" } });
+    check("eating a planned meal records one positive signal", eatenAfter === eatenBefore + 1, `${eatenBefore} -> ${eatenAfter}`);
+    await call("/api/meal-logs", { json: { entryId: entries[4].id, status: "eaten_as_planned" } });
+    check("saving the same meal again does not count twice", (await prisma.userRecipeSignal.count({ where: { userId: userId!, type: "eaten" } })) === eatenAfter);
+    const rated = await call("/api/signals", { json: { recipeId: entries[4].recipe.id, type: "rating", value: 5 } });
+    check("a 5-star rating is recorded", rated.status === 201);
+
+    console.log("\n9d. Saved recipe on a day");
+    const goodId = options[1]?.recipeId ?? options[0].recipeId; // a safe recipe by construction
+    await call("/api/favorites", { json: { recipeId: goodId } });
+    const useIt = await call("/api/swap", { json: { entryId: entries[5].id, recipeId: goodId } });
+    check("a saved safe recipe can replace a day's meal", useIt.status === 200 && useIt.body?.entry?.recipe?.id === goodId, `status ${useIt.status} ${useIt.body?.error ?? ""}`);
+    const unsafe = await prisma.recipe.findFirst({ where: { ownerId: null, allergens: { has: "peanut" } }, select: { id: true } });
+    if (unsafe) {
+      await call("/api/favorites", { json: { recipeId: unsafe.id } }); // saving is allowed; using it is not
+      const refused = await call("/api/swap", { json: { entryId: entries[6].id, recipeId: unsafe.id } });
+      check("a saved recipe with a peanut allergen is refused for a peanut-allergic user (422)", refused.status === 422, `status ${refused.status}`);
+    }
+    check("an unsaved recipe outside the options is refused (422)", (await call("/api/swap", { json: { entryId: entries[6].id, recipeId: (await prisma.recipe.findFirst({ where: { ownerId: null, id: { notIn: [goodId, unsafe?.id ?? ""] } }, select: { id: true } }))!.id } })).status === 422);
+
+    console.log("\n9e. Change a recipe in words, and create one (AI)");
+    const mod = await call("/api/modify", { json: { entryId: entries[3].id, request: "use less salt" } });
+    check("change request answers 200, or 422 when it cannot be made safely", mod.status === 200 || mod.status === 422, `status ${mod.status}`);
+    if (mod.status === 200) {
+      const withMod = await call(`/api/entries/${entries[3].id}`);
+      check("the entry shows the user's version", !!withMod.body?.modifiedRecipe?.request);
+      check("undo goes back to the original", (await call("/api/modify", { method: "DELETE", json: { entryId: entries[3].id } })).status === 200 && (await call(`/api/entries/${entries[3].id}`)).body?.modifiedRecipe === null);
+    }
+    let gen = await call("/api/generate", { json: { wish: "something with noodles", date: todayIso, mealType: "dinner" } });
+    if (gen.status === 422) gen = await call("/api/generate", { json: { wish: "something with noodles", date: todayIso, mealType: "dinner" } }); // the AI result can fail validation; retry once
+    check("create a recipe answers 200 (or 422/429 if the AI declines)", [200, 201, 422, 429].includes(gen.status), `status ${gen.status}`);
+    if (gen.status === 200 || gen.status === 201) {
+      check("the new recipe is marked as AI-made and added to the day", gen.body?.entry?.recipe?.source === "ai" && gen.body?.recipe?.source === "ai");
+      check("its allergen check passed (no peanut)", !(gen.body?.recipe?.allergens ?? []).includes("peanut"));
+    }
+
     console.log("\n10. Deleting the account");
     check("missing confirmation -> 400", (await call("/api/account", { method: "DELETE", json: { password } })).status === 400);
     check("wrong password -> 403 and nothing deleted", (await call("/api/account", { method: "DELETE", json: { confirm: "DELETE", password: "not-it" } })).status === 403 && (await prisma.profile.count({ where: { id: userId! } })) === 1);

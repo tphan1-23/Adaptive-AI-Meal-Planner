@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import BowlArt from "@/components/BowlArt";
-import { Button, ErrorText, Muted, Page, Spinner } from "@/components/ui";
+import { Button, ErrorText, Muted, Page, Sheet, Spinner } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { c } from "@/lib/theme";
 import { cap } from "@/lib/vocab";
@@ -31,6 +31,7 @@ export default function SavedRecipe() {
   const [favorite, setFavorite] = useState(true);
   const [tab, setTab] = useState<"ingr" | "method">("ingr");
   const [error, setError] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -98,6 +99,7 @@ export default function SavedRecipe() {
             {stat("Carbs", recipe.carbsG)}
             {stat("Fat", recipe.fatG)}
           </View>
+          <Button title="Use on a day" onPress={() => setPicking(true)} />
           <View style={{ flexDirection: "row", backgroundColor: c.chip, borderRadius: 14, padding: 4 }} accessibilityRole="tablist">
             {(["ingr", "method"] as const).map((t) => (
               <Pressable key={t} accessibilityRole="tab" accessibilityState={{ selected: tab === t }} onPress={() => setTab(t)} style={{ flex: 1, height: 44, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: tab === t ? c.white : "transparent" }}>
@@ -127,6 +129,57 @@ export default function SavedRecipe() {
           )}
         </>
       )}
+      {picking && recipe && <DaySheet recipeId={recipe.id} onClose={() => setPicking(false)} />}
     </Page>
+  );
+}
+
+type PlanDay = { entryId: string; date: string; meal: string };
+
+/** Pick a day of this week's plan to cook a saved recipe. The server re-checks it against allergies and diet first. */
+function DaySheet({ recipeId, onClose }: { recipeId: string; onClose: () => void }) {
+  const [days, setDays] = useState<PlanDay[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<{ plan: { entries: { id: string; date: string; position: number; recipe: { name: string } }[] } }>("/api/plan")
+      .then(({ plan }) => {
+        const first = new Map<string, PlanDay>();
+        for (const e of [...plan.entries].sort((a, b) => a.position - b.position)) {
+          const d = e.date.slice(0, 10);
+          if (!first.has(d)) first.set(d, { entryId: e.id, date: d, meal: e.recipe.name });
+        }
+        setDays([...first.values()].sort((a, b) => a.date.localeCompare(b.date)));
+      })
+      .catch((e) => setError((e as Error).message));
+  }, []);
+
+  async function use(d: PlanDay) {
+    setBusy(d.entryId);
+    setError(null);
+    try {
+      await api("/api/swap", { method: "POST", json: { entryId: d.entryId, recipeId } });
+      onClose();
+      router.replace("/today");
+    } catch (e) {
+      setError(e instanceof ApiError && e.status === 422 ? "This recipe doesn't fit your allergies or diet, so it can't be added." : (e as Error).message);
+      setBusy(null);
+    }
+  }
+
+  return (
+    <Sheet title="Use on a day" onClose={onClose}>
+      <Muted style={{ marginBottom: 12 }}>It replaces that day's meal. It's checked against your allergies and diet first.</Muted>
+      {!days && !error && <View style={{ paddingVertical: 24 }}><Spinner /></View>}
+      {days?.map((d) => (
+        <Pressable key={d.entryId} accessibilityRole="button" disabled={busy !== null} onPress={() => use(d)} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, borderTopWidth: 1, borderTopColor: c.line, opacity: busy && busy !== d.entryId ? 0.4 : 1 }}>
+          <View style={{ width: 84 }}><Text style={{ fontSize: 15, fontWeight: "600" }}>{new Date(`${d.date}T12:00:00`).toLocaleDateString(undefined, { weekday: "short", day: "numeric" })}</Text></View>
+          <Text numberOfLines={1} style={{ flex: 1, fontSize: 14, color: c.muted }}>{d.meal}</Text>
+          {busy === d.entryId ? <Spinner /> : null}
+        </Pressable>
+      ))}
+      <ErrorText>{error}</ErrorText>
+    </Sheet>
   );
 }

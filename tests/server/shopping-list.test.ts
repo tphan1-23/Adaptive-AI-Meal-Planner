@@ -44,7 +44,8 @@ describe("aggregateIngredients", () => {
       { mealId: "a", ingredients: [item("flour", 500, "g")] },
       { mealId: "b", ingredients: [item("flour", 1, "kg")] },
     ]);
-    expect(out).toEqual([{ name: "flour", quantity: 1500, unit: "g", mealCount: 2 }]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ name: "flour", quantity: 1500, unit: "g", mealCount: 2, staple: true });
   });
   it("does not add different unit families together", () => {
     const out = aggregateIngredients([

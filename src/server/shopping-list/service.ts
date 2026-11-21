@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "../db/prisma";
 import { aggregateIngredients, type IngredientLine, type MealIngredients } from "./aggregate";
+import { AISLE_ORDER } from "./tidy";
 
 const ingredientLine = z.object({
   name: z.string().min(1),
@@ -20,10 +21,16 @@ function parseIngredients(json: unknown): IngredientLine[] {
 }
 
 /** The ingredients a user actually needs for a meal: their AI-modified version if any, else the recipe's. */
-function mealIngredients(entry: { id: string; modifiedRecipe: unknown; recipe: { ingredients: unknown } }): MealIngredients {
+function mealIngredients(entry: { id: string; date: Date; modifiedRecipe: unknown; recipe: { name: string; ingredients: unknown } }): MealIngredients {
   const modified = (entry.modifiedRecipe as { ingredients?: unknown } | null)?.ingredients;
   const lines = parseIngredients(modified);
-  return { mealId: entry.id, ingredients: lines.length ? lines : parseIngredients(entry.recipe.ingredients) };
+  const name = (entry.modifiedRecipe as { name?: unknown } | null)?.name;
+  return {
+    mealId: entry.id,
+    recipe: typeof name === "string" && name ? name : entry.recipe.name,
+    date: entry.date.toISOString().slice(0, 10),
+    ingredients: lines.length ? lines : parseIngredients(entry.recipe.ingredients),
+  };
 }
 
 export const WEEK_START = /^\d{4}-\d{2}-\d{2}$/;
@@ -36,7 +43,7 @@ export async function getShoppingList(userId: string, weekStart?: string) {
   const plan = await prisma.weeklyPlan.findFirst({
     where: { userId, ...(weekStart ? { weekStart: new Date(`${weekStart}T00:00:00Z`) } : {}) },
     orderBy: { weekStart: "desc" },
-    include: { entries: { include: { recipe: { select: { ingredients: true } } } } },
+    include: { entries: { include: { recipe: { select: { name: true, ingredients: true } } } } },
   });
   if (!plan) return null;
 
@@ -59,11 +66,16 @@ export async function getShoppingList(userId: string, weekStart?: string) {
   ]);
 
   const saved = await prisma.shoppingListItem.findMany({ where: { planId: plan.id }, orderBy: { name: "asc" } });
-  const mealCounts = new Map(items.map((i) => [`${i.name}|${i.unit}`, i.mealCount]));
+  const meta = new Map(items.map((i) => [`${i.name}|${i.unit}`, i]));
   return {
     planId: plan.id,
     weekStart: plan.weekStart,
-    items: saved.map((i) => ({ ...i, mealCount: mealCounts.get(`${i.name}|${i.unit}`) ?? 1 })),
+    items: saved
+      .map((i) => {
+        const m = meta.get(`${i.name}|${i.unit}`);
+        return { ...i, mealCount: m?.mealCount ?? 1, aisle: m?.aisle ?? "other", staple: m?.staple ?? false, usedIn: m?.usedIn ?? [] };
+      })
+      .sort((a, b) => AISLE_ORDER.indexOf(a.aisle) - AISLE_ORDER.indexOf(b.aisle) || a.name.localeCompare(b.name)),
   };
 }
 

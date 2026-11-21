@@ -143,9 +143,12 @@ export async function saveMealLog(userId: string, input: MealLogInput) {
     ? await prisma.mealLog.update({ where: { id: existing.id }, data, select: logSelect })
     : await prisma.mealLog.create({ data: { userId, planEntryId, ...data }, select: logSelect });
 
-  // Only teach the preference model when a meal newly becomes skipped, not on every re-save.
+  // Only teach the preference model when a meal newly becomes skipped or eaten, not on every re-save.
   if (input.status === "skipped" && existing?.status !== "skipped" && recipeId) {
     await recordSignal(userId, recipeId, "skip");
+  }
+  if (input.status === "eaten_as_planned" && existing?.status !== "eaten_as_planned" && recipeId) {
+    await recordSignal(userId, recipeId, "eaten");
   }
   return formatMealLog(saved);
 }

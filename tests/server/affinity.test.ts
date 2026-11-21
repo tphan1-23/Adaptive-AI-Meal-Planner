@@ -43,6 +43,9 @@ describe("signalStrength", () => {
     expect(signalStrength("favorite")).toBeGreaterThan(0);
     expect(signalStrength("swap_in")).toBeGreaterThan(0);
     expect(signalStrength("skip")).toBeLessThan(0);
+    // eating a planned meal is a mild positive: more than nothing, less than saving or choosing it
+    expect(signalStrength("eaten")).toBeGreaterThan(0);
+    expect(signalStrength("eaten")).toBeLessThan(signalStrength("swap_in"));
     expect(signalStrength("swap_out")).toBeLessThan(0);
   });
 });

@@ -33,6 +33,7 @@ export default function Today() {
   const [swapFor, setSwapFor] = useState<Entry | null>(null);
   const [logFor, setLogFor] = useState<Entry | null>(null);
   const [foodOpen, setFoodOpen] = useState(false);
+  const [genOpen, setGenOpen] = useState(false);
 
   const load = useCallback(async () => {
     setState((s) => (s === "ready" ? s : "loading")); // keep showing the old data while refreshing
@@ -135,6 +136,8 @@ export default function Today() {
               <MealCard key={e.id} entry={e} profile={profile} target={plan.calorieTarget} reason={reasons[e.id]} logged={logs.find((l) => l.entryId === e.id)} canLog={canLog} onSwap={() => setSwapFor(e)} onLog={() => setLogFor(e)} />
             ))}
 
+            <Button title="Create a new recipe for me" variant="outline" onPress={() => setGenOpen(true)} />
+
             <EatenToday logs={logs} target={profile.calorieTarget} canLog={canLog} onAdd={() => setFoodOpen(true)} onRemoved={loadLogs} />
 
             <WeighInCard
@@ -162,12 +165,23 @@ export default function Today() {
       {logFor && (
         <LogMealSheet
           entryId={logFor.id}
+          recipeId={logFor.recipe.id}
           planned={Math.round(logFor.recipe.calories)}
           existing={logs.find((l) => l.entryId === logFor.id) ?? null}
           onClose={() => setLogFor(null)}
           onSaved={() => {
             setLogFor(null);
             loadLogs();
+          }}
+        />
+      )}
+      {genOpen && (
+        <GenerateSheet
+          date={selectedKey}
+          onClose={() => setGenOpen(false)}
+          onCreated={() => {
+            setGenOpen(false);
+            load(); // the new recipe is an extra meal on this day
           }}
         />
       )}
@@ -207,7 +221,10 @@ function MealCard({ entry, profile, target, reason, logged, canLog, onSwap, onLo
           <BowlArt name={r.name} tags={r.tags} imageUrl={r.imageUrl} />
         </Pressable>
       </Link>
-      <Muted style={{ fontSize: 13 }}>{tags.join(" · ")}</Muted>
+      <Muted style={{ fontSize: 13 }}>
+        {r.source === "ai" ? <Text style={{ color: c.brandDark, fontWeight: "600" }}>AI-made · </Text> : null}
+        {tags.join(" · ")}
+      </Muted>
       <Text accessibilityRole="header" style={{ fontSize: 26, lineHeight: 30, fontWeight: "600", letterSpacing: -0.5 }}>
         {r.name}
       </Text>
@@ -346,6 +363,36 @@ function SwapSheet({ entry, onClose, onSwapped }: { entry: Entry; onClose: () =>
           <Text style={{ color: c.white, fontSize: 20, fontWeight: "600" }}>↑</Text>
         </Pressable>
       </View>
+      <ErrorText>{error}</ErrorText>
+    </Sheet>
+  );
+}
+
+/** Ask the AI to create a brand-new private recipe from the user's tastes, optionally with a wish, and add it to the day. */
+function GenerateSheet({ date, onClose, onCreated }: { date: string; onClose: () => void; onCreated: () => void }) {
+  const [wish, setWish] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function create() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api("/api/generate", { method: "POST", json: { date, mealType: "dinner", ...(wish.trim() ? { wish: wish.trim() } : {}) } });
+      onCreated();
+    } catch (e) {
+      const status = e instanceof ApiError ? e.status : 0;
+      setError(status === 429 ? "You've reached today's limit for new recipes, or the AI is busy. Try again later." : status === 422 ? "We couldn't make a safe recipe this time. Please try again." : (e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Sheet title="Create a recipe" onClose={onClose}>
+      <Muted style={{ marginBottom: 14 }}>The AI writes a new recipe from the tastes the planner has learned. Calories come from ingredient data, and it is checked against your allergies and diet. It's private to you.</Muted>
+      <TextInput accessibilityLabel="What do you feel like" value={wish} onChangeText={setWish} maxLength={200} placeholder="Optional: something spicy with noodles" placeholderTextColor="#9A9A96" onSubmitEditing={() => !busy && create()} style={{ height: 50, borderWidth: 1, borderColor: c.line, borderRadius: 25, paddingHorizontal: 18, fontSize: 15, marginBottom: 12 }} />
+      <Button title="Create recipe" onPress={create} loading={busy} />
+      {busy && <Muted style={{ textAlign: "center", marginTop: 12, fontSize: 13 }}>This can take up to 30 seconds.</Muted>}
       <ErrorText>{error}</ErrorText>
     </Sheet>
   );

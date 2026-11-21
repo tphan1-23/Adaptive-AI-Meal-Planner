@@ -1,5 +1,5 @@
 /** Pages that need a logged-in user. API routes check the login themselves (they answer 401). */
-export const PROTECTED_PAGES = ["/dashboard", "/plan", "/today", "/recipes", "/shopping-list", "/onboarding"];
+export const PROTECTED_PAGES = ["/dashboard", "/plan", "/today", "/recipes", "/shopping-list", "/onboarding", "/saved", "/settings"];
 
 export const LOGIN_PATH = "/login";
 

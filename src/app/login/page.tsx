@@ -82,8 +82,9 @@ function LoginForm() {
     setError(null);
     setInfo(null);
     if (!isEmail(email)) return setError("Type your email above first.");
+    // The email links to the set-new-password page. This address must be an allowed redirect URL in Supabase.
     const { error } = await createSupabaseBrowser().auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: `${window.location.origin}/login`,
+      redirectTo: `${window.location.origin}/reset-password`,
     });
     if (error) setError(error.message);
     else setInfo(`If ${email.trim()} has an account, a reset link is on its way.`);

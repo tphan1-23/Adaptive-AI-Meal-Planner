@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import BowlArt from "@/components/BowlArt";
@@ -23,13 +23,16 @@ type Recipe = {
   equipment: string[];
   imageUrl: string | null;
   isFavorite: boolean;
+  /** "dataset" for Food.com recipes, "ai" for a recipe the AI made for this user. */
+  source?: string;
 };
 type Detail = {
   entry: Entry;
   recipe: Recipe;
   convertedSteps: string[];
   convertedForEquipment: string[];
-  modifiedRecipe: Partial<Recipe> | null;
+  /** The user's own AI-changed version, with the words they asked for. */
+  modifiedRecipe: (Partial<Recipe> & { request?: string; caloriesVerified?: boolean }) | null;
 };
 type Substitute = { name: string; quality: "close" | "rough"; grams: number; note: string };
 
@@ -88,6 +91,41 @@ export default function RecipeScreen() {
       setConvertNote(e instanceof ApiError && e.status === 429 ? "Please wait a minute and try again." : (e as Error).message);
     } finally {
       setConverting(false);
+    }
+  }
+
+  // Change the recipe in words ("make it vegetarian"), for this user only. Calories are re-checked in code; undo any time.
+  const [changeText, setChangeText] = useState("");
+  const [changing, setChanging] = useState(false);
+  const [changeNote, setChangeNote] = useState<string | null>(null);
+
+  async function applyChange() {
+    const request = changeText.trim();
+    if (request.length < 3) return setChangeNote("Describe the change in at least a few words.");
+    setChanging(true);
+    setChangeNote(null);
+    try {
+      await api("/api/modify", { method: "POST", json: { entryId: id, request } });
+      setChangeText("");
+      setShowOriginal(false);
+      await load();
+    } catch (e) {
+      const status = e instanceof ApiError ? e.status : 0;
+      setChangeNote(status === 422 ? "That change couldn't be made safely for you. Try different wording." : status === 429 ? "Please wait a minute and try again." : (e as Error).message);
+    } finally {
+      setChanging(false);
+    }
+  }
+
+  async function undoChange() {
+    setChanging(true);
+    try {
+      await api("/api/modify", { method: "DELETE", json: { entryId: id } });
+      await load();
+    } catch (e) {
+      setChangeNote((e as Error).message);
+    } finally {
+      setChanging(false);
     }
   }
 
@@ -151,6 +189,11 @@ export default function RecipeScreen() {
           <BowlArt size={170} name={shown.name} tags={shown.tags} imageUrl={recipe.imageUrl} />
         </View>
         <View style={{ gap: 10 }}>
+          {recipe.source === "ai" && (
+            <View style={{ alignSelf: "flex-start", backgroundColor: c.brandSoft, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 }}>
+              <Text style={{ fontSize: 12, fontWeight: "600", color: c.brandDark }}>AI-made recipe</Text>
+            </View>
+          )}
           <Text accessibilityRole="header" style={{ fontSize: 30, lineHeight: 33, fontWeight: "600", letterSpacing: -0.8 }}>
             {shown.name}
           </Text>
@@ -210,6 +253,27 @@ export default function RecipeScreen() {
               {convertNote ? <Muted style={{ fontSize: 13 }}>{convertNote}</Muted> : null}
             </View>
 
+            <View style={{ backgroundColor: c.surface, borderRadius: 18, padding: 16, gap: 12 }}>
+              <Text style={{ fontSize: 15, fontWeight: "600" }}>Change this recipe</Text>
+              {detail.modifiedRecipe ? (
+                <>
+                  <Muted style={{ fontSize: 13 }}>
+                    Your version: "{detail.modifiedRecipe.request}". Allergies were re-checked.
+                    {detail.modifiedRecipe.caloriesVerified === false ? " Calories could not be re-checked, so the original number is shown." : ""}
+                  </Muted>
+                  <Button title="Undo my change" variant="outline" onPress={undoChange} loading={changing} style={{ minHeight: 48 }} />
+                </>
+              ) : (
+                <>
+                  <Muted style={{ fontSize: 13 }}>Say what to change, like "make it vegetarian" or "less spicy". It only changes your copy.</Muted>
+                  <TextInput accessibilityLabel="Describe the change" value={changeText} onChangeText={setChangeText} maxLength={200} placeholder="Make it vegetarian" placeholderTextColor="#9A9A96" style={{ height: 50, borderWidth: 1, borderColor: c.line, borderRadius: 25, paddingHorizontal: 18, fontSize: 15, backgroundColor: c.white }} />
+                  <Button title="Apply change" onPress={applyChange} loading={changing} style={{ minHeight: 48 }} />
+                  {changing && <Muted style={{ fontSize: 13 }}>This can take up to 30 seconds.</Muted>}
+                </>
+              )}
+              {changeNote ? <Muted style={{ fontSize: 13 }}>{changeNote}</Muted> : null}
+            </View>
+
             {detail.convertedSteps.length > 0 && (
               <View style={{ backgroundColor: converted ? c.brandSoft : c.surface, borderRadius: 18, padding: 16 }}>
                 <Text style={{ fontSize: 14, lineHeight: 21 }}>
@@ -240,7 +304,7 @@ export default function RecipeScreen() {
         {!canLog && <Muted style={{ textAlign: "center", marginTop: 8, fontSize: 13 }}>You can log a meal up to tomorrow.</Muted>}
       </View>
 
-      {logOpen && <LogMealSheet entryId={entry.id} planned={Math.round(shown.calories)} existing={existingLog} onClose={() => setLogOpen(false)} onSaved={(l) => { setExistingLog(l); setLogOpen(false); }} />}
+      {logOpen && <LogMealSheet entryId={entry.id} recipeId={recipe.id} planned={Math.round(shown.calories)} existing={existingLog} onClose={() => setLogOpen(false)} onSaved={(l) => { setExistingLog(l); setLogOpen(false); }} />}
       {swapIngredient && <IngredientSheet entryId={entry.id} ingredient={swapIngredient} onClose={() => setSwapIngredient(null)} />}
     </View>
   );

@@ -9,11 +9,12 @@ import { Button, Chip, ErrorText, Label, Muted, Sheet } from "./ui";
 const box = { height: 50, borderWidth: 1, borderColor: c.line, borderRadius: 25, paddingHorizontal: 18, fontSize: 16, color: c.ink } as const;
 
 /** Log a planned meal: ate it as planned, changed it (with calories), or skipped it. Can also remove an earlier log. */
-export function LogMealSheet({ entryId, planned, existing, onClose, onSaved }: { entryId: string; planned: number; existing: MealLog | null; onClose: () => void; onSaved: (l: MealLog | null) => void }) {
+export function LogMealSheet({ entryId, recipeId, planned, existing, onClose, onSaved }: { entryId: string; recipeId?: string; planned: number; existing: MealLog | null; onClose: () => void; onSaved: (l: MealLog | null) => void }) {
   const [changing, setChanging] = useState(false);
   const [kcal, setKcal] = useState(String(planned));
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<MealLog | null>(null); // set after eating: the "How was it?" step
 
   async function save(status: "eaten_as_planned" | "skipped" | "modified") {
     const calories = Number(kcal);
@@ -22,11 +23,32 @@ export function LogMealSheet({ entryId, planned, existing, onClose, onSaved }: {
     setError(null);
     try {
       const res = await api<{ log: MealLog }>("/api/meal-logs", { method: "POST", json: { entryId, status, ...(status === "modified" ? { calories } : {}) } });
-      onSaved(res.log);
+      // After eating something, ask how it was, so the planner learns what you like. Skips need no question.
+      if (status !== "skipped" && recipeId) setSaved(res.log);
+      else onSaved(res.log);
     } catch (e) {
       setError((e as Error).message);
       setBusy(null);
     }
+  }
+
+  async function rate(value: 5 | 1 | null) {
+    if (!saved) return;
+    if (value !== null && recipeId) await api("/api/signals", { method: "POST", json: { recipeId, type: "rating", value } }).catch(() => {}); // a failed rating must not block logging
+    onSaved(saved);
+  }
+
+  if (saved) {
+    return (
+      <Sheet title="How was it?" onClose={() => rate(null)}>
+        <Muted style={{ marginBottom: 14 }}>Your answer helps the planner pick meals you'll like.</Muted>
+        <View style={{ gap: 10 }}>
+          <Button title="Loved it" onPress={() => rate(5)} />
+          <Button title="It was fine" variant="outline" onPress={() => rate(null)} />
+          <Button title="Not for me" variant="outline" onPress={() => rate(1)} />
+        </View>
+      </Sheet>
+    );
   }
 
   async function undo() {

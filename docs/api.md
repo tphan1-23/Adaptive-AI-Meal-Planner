@@ -102,7 +102,8 @@ An **entry** is one meal in a plan:
   "converted": false, "modified": false }
 ```
 `imageUrl` is a photo of the dish, or `null` when no photo matches (show an illustration instead). See
-[Dish photos](#dish-photos).
+[Dish photos](#dish-photos). `recipe.source` is `"dataset"` for Food.com recipes and `"ai"` for a recipe the AI made for this
+user: label those "AI-made" so the user knows which content is AI-generated.
 
 ### `GET /api/plan?date=YYYY-MM-DD`
 The plan for the week containing `date` (default: this week).
@@ -200,8 +201,11 @@ AI budget). Every option already passed the diet, allergy and ingredient checks.
 `{ "entryId": "…", "request": "something with chicken", "recipeId": "…" }` replaces that meal with another that fits the user. Clears
 any conversion or modification and teaches the preference model.
 
-`recipeId` (optional) is a choice from `/api/swap/options`. That exact recipe is used, with no AI call, but only if it is
-still in the user's safe pool; otherwise `422`. Without it, the AI (or the top-ranked recipe) chooses.
+`recipeId` (optional) is a choice from `/api/swap/options`, or one of the user's **saved recipes**. That exact recipe is used, with no
+AI call. A choice from the options must still be in the user's safe pool. A saved recipe is allowed even if it is not among the
+top options, but only after the same allergy, diet and real-ingredient checks; a saved recipe that is not safe for the user is
+refused. Either way the answer is `422` when it can't be used. Without `recipeId`, the AI (or the top-ranked recipe) chooses.
+This is how a saved recipe is put on a day: `POST /api/swap { entryId, recipeId }`.
 
 `request` is optional plain text up to 200 characters, such as `"something with chicken"`, `"Thai noodles"` or
 `"lighter, no onions"`. Words after "no", "without" or "avoid" are things to leave out. The new recipe is chosen from
@@ -269,10 +273,26 @@ added to that day as an extra. Returns `{ "recipe": { … }, "entry": { … } | 
 The de-duplicated list for that week's plan. Omit `weekStart` for the most recent plan. Items already ticked stay ticked.
 ```json
 { "planId": "…", "weekStart": "2026-11-16",
-  "items": [ { "id": "…", "name": "garlic", "quantity": 3, "unit": "item", "checked": false, "mealCount": 3 } ] }
+  "items": [ { "id": "…", "name": "garlic", "quantity": 3, "unit": "item", "checked": false, "mealCount": 3,
+               "aisle": "produce", "staple": false,
+               "usedIn": [ { "mealId": "…", "recipe": "Lasagna", "date": "2026-11-17" } ] } ] }
 ```
 `quantity` for dataset recipes counts how many times the item is needed (placeholder units). `mealCount` is how many
 planned meals use it. `404` if the user has no plan.
+
+**Names are cleaned in code** (no AI, `src/server/shopping-list/tidy.ts`): the same product written different ways becomes one
+item ("garlic clove", "garlic cloves", "minced garlic" -> "garlic"; "lean ground beef" -> "ground beef"; "basil leaves" ->
+"basil"), plural forms are fixed ("chilies" -> "chili"), and combined lines are split ("salt and pepper" -> "salt" and
+"black pepper"). Dried and fresh herbs stay separate products, and an allergen such as peanut oil is never merged into plain oil.
+Measured on real 7-dinner weeks: 76 items became 61 (56 to buy once pantry basics are set aside), and 56 became 46 (41 to buy).
+What remains are mostly genuinely different products; a week of seven different dinners cannot shrink much further, which is why
+clients should also offer the by-aisle and by-recipe views.
+
+- `aisle` is one of `produce`, `meat`, `seafood`, `dairy`, `bakery`, `frozen`, `pantry`, `spices`, `other`. Items come back in aisle order.
+- `staple` is `true` for things most kitchens already have (salt, black pepper, water, cooking oil, olive oil, sugar, flour). Show
+  them apart ("Pantry basics") and leave them out of the "to buy" count.
+- `usedIn` lists the meals that need the item, so a client can group **by recipe** instead of by aisle.
+- Ticks are remembered by cleaned name and unit. Lists built before names were cleaned lose their old ticks once.
 
 ### `PATCH /api/shopping-list`
 `{ "itemId": "…", "checked": true }` ticks or unticks an item. Returns `{ "ok": true }`, or `404` if the item isn't theirs.
@@ -356,6 +376,25 @@ Returns `201 { "updatedTags": { "italian": 0.1, "pasta": 0.1 } }`. `404` if the 
 ```json
 { "affinity": { "italian": 0.3, "spicy": -0.1 }, "liked": ["italian"], "disliked": ["spicy"] }
 ```
+
+### How the planner learns (what is and is not recorded)
+The planner keeps one **taste score per tag per user** (for example `italian`, `noodles`, `spicy`), between -1.5 and +1.5.
+Every signal on a recipe moves the scores of that recipe's meaningful tags by `strength x 0.1`:
+
+| Signal | Strength | Recorded when |
+| --- | --- | --- |
+| `favorite` | +1.0 | the user saves a recipe (once per recipe) |
+| `swap_in` | +0.4 | the user chooses a replacement meal |
+| `eaten` | +0.3 | a planned meal is logged "eaten as planned" for the first time (recorded by the server, not sent by clients) |
+| `rating` | -1.0 to +1.0 | the user answers "How was it?" (5 stars = Loved it, 1 = Not for me) |
+| `swap_out` | -0.6 | the user swaps a meal away |
+| `skip` | -0.8 | a planned meal is logged "skipped" for the first time |
+
+How the scores are used: they nudge the **ranking** of recipes that already passed the allergy, diet and calorie filters
+(`score = calorie error - 0.05 x tag scores`), and the user's top liked tags are passed to the AI as context when it chooses a
+recipe or writes a new one. The cuisines chosen at onboarding start with a small boost. This is a per-user preference
+model, not training of the AI. It never touches safety: allergies and diet are rules in code, not learned. Not recorded:
+ad-hoc foods the user logged, ingredient-level likes or dislikes, and anything about time or effort (those tags are ignored as generic).
 
 ---
 

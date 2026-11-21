@@ -116,7 +116,8 @@ async function recentRecipeIds(userId: string, weekStart: string): Promise<strin
 // ---------- shapes returned to the client ----------
 
 const entryInclude = {
-  recipe: { select: { id: true, name: true, calories: true, proteinG: true, carbsG: true, fatG: true, tags: true, equipment: true } },
+  // `source` is "dataset" or "ai", so apps can label recipes the AI made.
+  recipe: { select: { id: true, name: true, source: true, calories: true, proteinG: true, carbsG: true, fatG: true, tags: true, equipment: true } },
 } satisfies Prisma.PlanEntryInclude;
 
 type EntryRow = Prisma.PlanEntryGetPayload<{ include: typeof entryInclude }>;
@@ -402,6 +403,21 @@ export async function recommendForDay(
 const SWAP_OPTIONS = 3;
 
 /**
+ * One of the user's saved recipes, if (and only if) it is safe for them: it passes the allergy and diet filters and the
+ * check on its real ingredient names. Returns null when it is not saved, not visible to the user, or not safe.
+ */
+async function safeSavedRecipe(userId: string, recipeId: string, ctx: UserPlanningContext): Promise<RecipeLite | null> {
+  const saved = await prisma.favoriteRecipe.findUnique({ where: { userId_recipeId: { userId, recipeId } }, select: { id: true } });
+  if (!saved) return null;
+  const row = await prisma.recipe.findFirst({ where: { id: recipeId, OR: [{ ownerId: null }, { ownerId: userId }] }, select: RECIPE_SELECT });
+  if (!row) return null;
+  const passed = filterRecipes([row as RecipeLite], ctx);
+  if (passed.length === 0) return null;
+  const safe = await dropUnsafeByIngredients(passed, ctx, null);
+  return safe[0] ?? null;
+}
+
+/**
  * The safe, ranked pool a swap draws from: the user's diet and allergy filters, the ingredient-level
  * safety net, recipes not already used this week or recently, and (when asked) their text request.
  * Shared by `swapOptions` (shows the best few) and `swapEntry` (applies one).
@@ -468,12 +484,14 @@ export function describeOption(r: Pick<RecipeLite, "calories" | "tags">, targetC
  * that safe pool, so a made-up or unsafe id is refused (422) and no AI call is made.
  */
 export async function swapEntry(userId: string, entryId: string, request?: string, recipeId?: string) {
-  const { entry, shortlist, targetCalories, taste, wish, matchedRequest, note } = await swapPool(userId, entryId, request);
+  const { entry, ctx, shortlist, targetCalories, taste, wish, matchedRequest, note } = await swapPool(userId, entryId, request);
 
   let choice: Choice;
   if (recipeId) {
-    const picked = shortlist.find((r) => r.id === recipeId);
-    if (!picked) throw new HttpError(422, "That recipe is no longer available as a swap. Pick another.");
+    // A choice from the swap options, or one of the user's saved recipes. A saved recipe is allowed even if it is
+    // not among the top options, but only after the same allergy, diet and ingredient checks as everything else.
+    const picked = shortlist.find((r) => r.id === recipeId) ?? (await safeSavedRecipe(userId, recipeId, ctx));
+    if (!picked) throw new HttpError(422, "That recipe is not available for you as a swap. Pick another.");
     choice = { recipeId: picked.id, reason: "You chose this one.", fromAi: false };
   } else {
     choice = await pickFrom(userId, shortlist, {

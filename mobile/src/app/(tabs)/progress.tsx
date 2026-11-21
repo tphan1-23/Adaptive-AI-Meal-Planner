@@ -70,6 +70,11 @@ function Body({ d, w }: { d: { profile: Profile; logs: WeighIn[]; adh: Adherence
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3);
   const top = tastes[0]?.[1] ?? 1;
+  const dislikes = Object.entries(d.signals.affinity)
+    .filter(([, v]) => v < 0)
+    .sort((a, b) => a[1] - b[1])
+    .slice(0, 3);
+  const worst = Math.abs(dislikes[0]?.[1] ?? 1);
 
   const stat = (label: string, value: string, unit: string, accent?: boolean) => (
     <View style={{ flex: 1 }}>
@@ -131,12 +136,23 @@ function Body({ d, w }: { d: { profile: Profile; logs: WeighIn[]; adh: Adherence
 
       <View style={{ gap: 16 }}>
         <H2>What the planner learned</H2>
-        {tastes.length === 0 && <Muted>Keep, swap and skip meals and your tastes will show up here.</Muted>}
+        <Muted style={{ fontSize: 13 }}>It learns from the meals you save, eat, rate, swap and skip. This only changes how meals are ranked for you; allergies and diet are never learned, they are rules.</Muted>
+        {tastes.length === 0 && dislikes.length === 0 && <Muted>Keep, swap and skip meals and your tastes will show up here.</Muted>}
+        {tastes.length > 0 && <Text style={{ fontSize: 13, fontWeight: "600", color: c.muted }}>YOU LIKE</Text>}
         {tastes.map(([tag, v]) => (
           <View key={tag}>
             <Text style={{ fontSize: 14, marginBottom: 8 }}>{tag.charAt(0).toUpperCase() + tag.slice(1).replace(/-/g, " ")}</Text>
             <View style={{ height: 4, borderRadius: 2, backgroundColor: c.line }}>
               <View style={{ width: `${Math.max(8, Math.round((v / top) * 100))}%`, height: 4, borderRadius: 2, backgroundColor: c.brand }} />
+            </View>
+          </View>
+        ))}
+        {dislikes.length > 0 && <Text style={{ fontSize: 13, fontWeight: "600", color: c.muted }}>NOT YOUR THING</Text>}
+        {dislikes.map(([tag, v]) => (
+          <View key={tag}>
+            <Text style={{ fontSize: 14, marginBottom: 8 }}>{tag.charAt(0).toUpperCase() + tag.slice(1).replace(/-/g, " ")}</Text>
+            <View style={{ height: 4, borderRadius: 2, backgroundColor: c.line }}>
+              <View style={{ width: `${Math.max(8, Math.round((Math.abs(v) / worst) * 100))}%`, height: 4, borderRadius: 2, backgroundColor: "#9A9A96" }} />
             </View>
           </View>
         ))}

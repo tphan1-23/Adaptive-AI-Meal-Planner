@@ -68,6 +68,9 @@ function Body({ d }: { d: Data }) {
   const t = d.adh.totals;
   const tastes = Object.entries(d.signals.affinity).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
   const top = tastes[0]?.[1] ?? 1;
+  const dislikes = Object.entries(d.signals.affinity).filter(([, v]) => v < 0).sort((a, b) => a[1] - b[1]).slice(0, 3);
+  const worst = Math.abs(dislikes[0]?.[1] ?? 1);
+  const pretty = (tag: string) => tag.charAt(0).toUpperCase() + tag.slice(1).replace(/-/g, " ");
 
   const stat = (label: string, value: string, unit: string, accent?: boolean) => (
     <div className="flex-1">
@@ -121,12 +124,23 @@ function Body({ d }: { d: Data }) {
 
       <section aria-label="Learned tastes" className="flex flex-col gap-4">
         <h2 className="text-[17px] font-semibold">What the planner learned</h2>
-        {tastes.length === 0 && <p className="text-[14px] text-ink-muted">Keep, swap and skip meals and your tastes will show up here.</p>}
+        <p className="text-[13px] text-ink-muted">It learns from the meals you save, eat, rate, swap and skip. This only changes how meals are ranked for you; allergies and diet are never learned, they are rules.</p>
+        {tastes.length === 0 && dislikes.length === 0 && <p className="text-[14px] text-ink-muted">Keep, swap and skip meals and your tastes will show up here.</p>}
+        {tastes.length > 0 && <p className="text-[13px] font-semibold text-ink-muted">YOU LIKE</p>}
         {tastes.map(([tag, v]) => (
           <div key={tag}>
-            <div className="mb-2 text-[14px]">{tag.charAt(0).toUpperCase() + tag.slice(1).replace(/-/g, " ")}</div>
+            <div className="mb-2 text-[14px]">{pretty(tag)}</div>
             <div className="h-1 rounded-sm bg-line">
               <div className="h-1 rounded-sm bg-brand" style={{ width: `${Math.max(8, Math.round((v / top) * 100))}%` }} />
+            </div>
+          </div>
+        ))}
+        {dislikes.length > 0 && <p className="text-[13px] font-semibold text-ink-muted">NOT YOUR THING</p>}
+        {dislikes.map(([tag, v]) => (
+          <div key={tag}>
+            <div className="mb-2 text-[14px]">{pretty(tag)}</div>
+            <div className="h-1 rounded-sm bg-line">
+              <div className="h-1 rounded-sm" style={{ width: `${Math.max(8, Math.round((Math.abs(v) / worst) * 100))}%`, background: "#9A9A96" }} />
             </div>
           </div>
         ))}

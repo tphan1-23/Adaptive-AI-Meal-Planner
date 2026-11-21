@@ -58,9 +58,15 @@ npx expo start --web                   # the app in a browser, handy for quick v
 `npx eas-cli@latest build --profile preview --platform android` builds an installable APK once an EAS account
 and a hosted API URL (`EXPO_PUBLIC_API_URL`) exist. The bundle ids are in `app.json`.
 
+## Also in the app
+
+- **Shopping** is cleaned in code (`garlic clove` and `garlic` become one item), grouped by aisle or by recipe, with pantry basics set aside.
+- **How was it?** after eating a meal feeds the taste model (see "How the planner learns" in `docs/api.md`); Progress shows what you like and what you don't.
+- **Create a recipe** (AI) from Today, **change this recipe** in words from the recipe screen, and **Use on a day** for saved recipes.
+- `EXPO_PUBLIC_WEB_URL` (optional) makes the forgot-password email land on the web app's set-new-password page.
+
 ## Not built yet
 
 - Photos are of the *dish* (matched by recipe name), not of the exact recipe; about a quarter of dinner recipes have no match and show an illustration.
-- "Change this recipe in words" and "generate a new recipe" have API routes but no screen yet.
-- Saved recipes cannot be added to a day of the plan directly.
-- A reset-password screen for forgotten passwords (the email link needs a page to land on).
+- A set-new-password screen inside the phone app (the reset email opens the web app's page).
+- Real ingredient quantities for dataset recipes.
